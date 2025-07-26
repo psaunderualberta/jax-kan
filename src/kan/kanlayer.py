@@ -21,7 +21,7 @@ class KANLayer(eqx.Module):
         self.num_splines = grid + k
         self.grid_points = jnp.linspace(-grid_endpoint, grid_endpoint, grid + 2 * k)
 
-        self.coeffs = jr.uniform(key, (in_dim, out_dim, self.num_splines), minval=-lim, maxval=lim)
+        self.control_points = jr.uniform(key, (in_dim, out_dim, self.num_splines), minval=-lim, maxval=lim)
         
 
     def __call__(self):
