@@ -16,31 +16,42 @@ class KANLayer(eqx.Module):
     control_points: chex.Array = None
 
     silu: eqx.Module = None
+    bound: float = 0
 
     def __init__(
         self, in_dim: int, out_dim: int,
         grid: int, k: int, num_stds: int, 
         key: chex.PRNGKey
     ):
-        limit = 1 / jnp.sqrt(in_dim)
-        self.w_b = jr.uniform(key, (in_dim, out_dim), minval=-limit, maxval=limit)
+        
+        # initialization - ones for bias, xavier for matrix
+        # see https://arxiv.org/pdf/2404.19756, page 6
+        self.w_b = jnp.ones((in_dim, out_dim))
+        limit = jnp.sqrt(6 / (in_dim + out_dim))
         self.w_s = jr.uniform(key, (in_dim, out_dim), minval=-limit, maxval=limit)
 
+        # Grid
         grid_width = grid / num_stds
-
         num_knots = grid + 1
         num_augmented_knots = num_knots + 2 * k
         self.grid_points = jnp.linspace(-k * grid_width, grid + k * grid_width, num_augmented_knots)
 
+        # Coefficients, i.e. control points in spline terminology
         num_control_points = grid + k - 1
         self.control_points = jr.uniform(key, (in_dim, out_dim, num_control_points), minval=-limit, maxval=limit)
         
+        # activation
         self.silu = SILU()
+        self.bound = num_stds * 1.0
 
 
     def __call__(self, x):
         x = x.T
-        num_datapoints = x.shape[1]
+
+        # clip x to within appropriate range
+        bound = lax.stop_gradient(self.bound)
+        x = jnp.clip(x, min=-bound, max=bound)
+
         # (in * out) x (in * num_datapoints) -> (in * out * num_datapoints)
         biases = jnp.einsum('ij,ik->ijk', self.w_b, self.silu(x))  # TODO: Correct?
 
