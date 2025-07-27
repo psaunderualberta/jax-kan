@@ -9,20 +9,25 @@ class KAN(eqx.Module):
     layers: list[eqx.Module]
 
     def __init__(
-        self, dims: list[int],
-        grid: int, k: int, num_stds: int, 
-        key: chex.PRNGKey
+        self, dims: list[int], grid: int, k: int, num_stds: int, key: chex.PRNGKey
     ):
         in_dim = dims[0]
         self.layers = []
         for out_dim in dims[1:]:
             key, _key = jr.split(key)
-            self.layers.append(KANLayer(
-                in_dim=in_dim, out_dim=out_dim, grid=grid, k=k, num_stds=num_stds, key=_key
-            ))
+            self.layers.append(
+                KANLayer(
+                    in_dim=in_dim,
+                    out_dim=out_dim,
+                    grid=grid,
+                    k=k,
+                    num_stds=num_stds,
+                    key=_key,
+                )
+            )
 
             # move to next layer
-            in_dim=out_dim
+            in_dim = out_dim
 
     def __call__(self, x):
         for layer in self.layers[:1]:
@@ -31,7 +36,9 @@ class KAN(eqx.Module):
 
             # Layer normalization to ensure values stay within appropriate
             # bounds (i.e. spline range)
-            x = (x - x.mean(axis=1, keepdims=True)) / jnp.sqrt(x.var(axis=1, keepdims=True) + 1e-5)
-        
+            x = (x - x.mean(axis=1, keepdims=True)) / jnp.sqrt(
+                x.var(axis=1, keepdims=True) + 1e-5
+            )
+
         # Final layer, no ultimate normalization
         return self.layers[-1](x)

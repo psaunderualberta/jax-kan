@@ -12,6 +12,7 @@ import os
 
 __DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
+
 def _dataloader_california(degree=1):
     X, y = fetch_california_housing(return_X_y=True)
     X = (X - X.mean(axis=0)) / X.std(axis=0)
@@ -50,6 +51,7 @@ def _dataloader_mnist(_=None) -> Tuple[chex.Array, chex.Array]:
 
     return images, labels
 
+
 def _dataloader_cifar_10(_=None) -> Tuple[chex.Array, chex.Array]:
     ds = load_dataset("uoft-cs/cifar10", split="train")
     # https://huggingface.co/docs/datasets/en/use_with_jax
@@ -62,7 +64,7 @@ def _dataloader_cifar_10(_=None) -> Tuple[chex.Array, chex.Array]:
 
     # normalize & flatten images
     images = images / 255.0
-    
+
     # images are n x n x c, should be c x n x n
     images = images.transpose((0, 3, 1, 2))
 

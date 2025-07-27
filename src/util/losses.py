@@ -11,6 +11,7 @@ def non_vmap_cce_loss(model: eqx.Module, x: chex.Array, y: chex.Array):
 
     return softmax_cross_entropy(pred_y, y).mean()
 
+
 @eqx.filter_jit
 def classification_accuracy(model, x, y):
     pred_y = model(x)

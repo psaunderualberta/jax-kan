@@ -3,7 +3,7 @@ import chex
 from functools import partial
 
 
-@partial(jit, static_argnames=('order',))
+@partial(jit, static_argnames=("order",))
 def bspline(x: chex.Array, knots: chex.Array, controls: chex.Array, order: int):
     """Evaluates a B-spline using de Boor's algorithm
     See https://en.wikipedia.org/wiki/De_Boor%27s_algorithm for more info
@@ -12,22 +12,26 @@ def bspline(x: chex.Array, knots: chex.Array, controls: chex.Array, order: int):
     ---------
     x: Elements at which to evaluate spline(x)
     knots: Array of knot positions, *not yet padded*
-    controls: Array of control points. 
+    controls: Array of control points.
     order: Degree of B-spline.
     """
-    idxs = jnp.searchsorted(knots, x, side='right') - 1
+    idxs = jnp.searchsorted(knots, x, side="right") - 1
     d = [controls[j + idxs - order] for j in range(0, order + 1)]
 
     for r in range(1, order + 1):
         for j in range(order, r - 1, -1):
-            alpha = (x - knots[j + idxs - order]) / (knots[j + 1 + idxs - r] - knots[j + idxs - order])
+            alpha = (x - knots[j + idxs - order]) / (
+                knots[j + 1 + idxs - r] - knots[j + idxs - order]
+            )
             d[j] = (1.0 - alpha) * d[j - 1] + alpha * d[j]
-    
+
     return d[order]
 
 
-@partial(jit, static_argnames=('order',))
-def bspline_multi_control(x: chex.Array, knots: chex.Array, controls: chex.Array, order: int):
+@partial(jit, static_argnames=("order",))
+def bspline_multi_control(
+    x: chex.Array, knots: chex.Array, controls: chex.Array, order: int
+):
     """Evaluates a B-spline using de Boor's algorithm, with multiple control point arrays
     See https://en.wikipedia.org/wiki/De_Boor%27s_algorithm for more info
 
@@ -35,7 +39,7 @@ def bspline_multi_control(x: chex.Array, knots: chex.Array, controls: chex.Array
     ---------
     x: N x M Elements at which to evaluate spline(x)
     knots: Array of knot positions, *not yet padded*
-    controls: K x C stacked arrays of 'C' control points. 
+    controls: K x C stacked arrays of 'C' control points.
     order: Degree of B-spline.
 
 
@@ -43,14 +47,16 @@ def bspline_multi_control(x: chex.Array, knots: chex.Array, controls: chex.Array
     ---------
     K x N x M array, where K
     """
-    idxs = jnp.searchsorted(knots, x, side='right', method='scan_unrolled') - 1
+    idxs = jnp.searchsorted(knots, x, side="right", method="scan_unrolled") - 1
     d = [controls[:, j + idxs - order] for j in range(0, order + 1)]
 
     for r in range(1, order + 1):
         for j in range(order, r - 1, -1):
-            alpha = (x - knots[j + idxs - order]) / (knots[j + 1 + idxs - r] - knots[j + idxs - order])
+            alpha = (x - knots[j + idxs - order]) / (
+                knots[j + 1 + idxs - r] - knots[j + idxs - order]
+            )
             d[j] = (1.0 - alpha) * d[j - 1] + alpha * d[j]
-    
+
     return d[order].squeeze()
 
 
@@ -64,10 +70,12 @@ if __name__ == "__main__":
     x = jnp.asarray([-2, -1, 0, 1, 1.99, -2, -1, 3, 1, 1.99, -2, -2, -2, -2, -2])
     print(bspline(x, knots, controls, p))
 
-    controls = jnp.asarray([
-        [1, 1, 1, 1, 1, 1, 1],
-        [0, 1, 0, 1, 0, 1, 0],
-    ])
+    controls = jnp.asarray(
+        [
+            [1, 1, 1, 1, 1, 1, 1],
+            [0, 1, 0, 1, 0, 1, 0],
+        ]
+    )
 
     print(x.shape, controls.shape)
     print(bspline_multi_control(x, knots, controls, p).shape)
