@@ -18,7 +18,7 @@ def main():
 
     batch_size = 512
     batch_x, batch_y = x[:32, :], y[:32, :]
-    optimizer = optax.sgd(learning_rate=0.003)
+    optimizer = optax.sgd(learning_rate=0.05)
     opt_state = optimizer.init(network)
 
     while True:
@@ -26,7 +26,6 @@ def main():
         idxs = jr.permutation(_key, x.shape[0])[:batch_size]
 
         batch_x, batch_y = x[idxs, :], y[idxs, :]
-        print(batch_x.shape)
 
         loss, grads = non_vmap_cce_loss(network, batch_x, batch_y)
         print(round(loss, 3))

@@ -1,7 +1,7 @@
 import equinox as eqx
 from kan import KANLayer
 import jax.random as jr
-from jax import vmap
+import jax.numpy as jnp
 import chex
 
 
@@ -21,9 +21,6 @@ class KAN(eqx.Module):
                 in_dim=in_dim, out_dim=out_dim, grid=grid, k=k, num_stds=num_stds, key=_key
             ))
 
-            # add layer normalization to ensure the method is within the grid
-            layers.append(vmap(eqx.nn.LayerNorm(out_dim, use_weight=False, use_bias=False)))
-
             # move to next layer
             in_dim=out_dim
         
@@ -34,8 +31,8 @@ class KAN(eqx.Module):
         self.layers = layers
 
     def __call__(self, x):
-        x = x.T
-        for layer in self.layers:
+        for layer in self.layers[:1]:
             x = layer(x)
+            x = (x - x.mean(axis=1, keepdims=True)) / jnp.sqrt(x.var(axis=1, keepdims=True) + 1e-5)
         
-        return x.T
+        return self.layers[-1](x)

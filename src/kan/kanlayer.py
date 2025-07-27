@@ -39,6 +39,7 @@ class KANLayer(eqx.Module):
 
 
     def __call__(self, x):
+        x = x.T
         num_datapoints = x.shape[1]
         # (in * out) x (in * num_datapoints) -> (in * out * num_datapoints)
         biases = jnp.einsum('ij,ik->ijk', self.w_b, self.silu(x))  # TODO: Correct?
@@ -51,7 +52,7 @@ class KANLayer(eqx.Module):
         non_summed_activations = biases + self.w_s[:, :, None] * mapped
         summed_activations = jnp.sum(non_summed_activations, axis=0)
 
-        return summed_activations
+        return summed_activations.T
 
         
 
