@@ -43,7 +43,6 @@ def bspline_multi_control(x: chex.Array, knots: chex.Array, controls: chex.Array
     ---------
     K x N x M array, where K
     """
-    print(x.shape, controls.shape)
     idxs = jnp.searchsorted(knots, x, side='right') - 1
     d = [controls[:, j + idxs - order] for j in range(0, order + 1)]
 

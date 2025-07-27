@@ -12,9 +12,6 @@ class KANLayer(eqx.Module):
     w_b: chex.Array = None
     w_s: chex.Array = None
 
-    num_splines: int = 0
-    num_control_points: int = 0
-
     grid_points: chex.Array = None
     control_points: chex.Array = None
 
@@ -30,15 +27,13 @@ class KANLayer(eqx.Module):
         self.w_s = jr.uniform(key, (in_dim, out_dim), minval=-limit, maxval=limit)
 
         grid_width = grid / num_stds
-        grid_endpoint = k * grid_width + grid
 
         num_knots = grid + 1
         num_augmented_knots = num_knots + 2 * k
-        self.num_splines = grid + k
         self.grid_points = jnp.linspace(-k * grid_width, grid + k * grid_width, num_augmented_knots)
 
-        self.num_control_points = grid + k - 1
-        self.control_points = jr.uniform(key, (in_dim, out_dim, self.num_control_points), minval=-limit, maxval=limit)
+        num_control_points = grid + k - 1
+        self.control_points = jr.uniform(key, (in_dim, out_dim, num_control_points), minval=-limit, maxval=limit)
         
         self.silu = SILU()
 
@@ -47,22 +42,14 @@ class KANLayer(eqx.Module):
         num_datapoints = x.shape[1]
         # (in * out) x (in * num_datapoints) -> (in * out * num_datapoints)
         biases = jnp.einsum('ij,ik->ijk', self.w_b, self.silu(x))  # TODO: Correct?
-        print(biases.shape)
 
         # (in * out * coeff) x (in * num_datapoints) -> (out * num_datapoints)
         stable_grid_points = lax.stop_gradient(self.grid_points)
         vmapped_bspline = vmap(bspline_multi_control, in_axes=(0, None, 0, None))
         mapped = vmapped_bspline(x, stable_grid_points, self.control_points, 3)
-        print(mapped.shape)
 
         non_summed_activations = biases + self.w_s[:, :, None] * mapped
         summed_activations = jnp.sum(non_summed_activations, axis=0)
-        print(mapped)
-        print(mapped.shape)
-
-        print(mapped.shape)
-        print(non_summed_activations.shape)
-        print(summed_activations.shape)
 
         return summed_activations
 

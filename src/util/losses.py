@@ -1,5 +1,6 @@
 import equinox as eqx
 from optax import softmax_cross_entropy
+import chex
 
 
 @eqx.filter_jit

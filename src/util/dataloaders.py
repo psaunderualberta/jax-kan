@@ -42,7 +42,6 @@ def _dataloader_mnist(_=None) -> Tuple[chex.Array, chex.Array]:
 
     images = jnp.load(image_file)
     labels = jnp.load(label_file)
-    print("here")
     # convert 'labels' to one-hot encoding
 
     # normalize & flatten images
