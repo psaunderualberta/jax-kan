@@ -42,7 +42,7 @@ def main():
 
         # Update network
         updates, opt_state = optimizer.update(grads, opt_state, network)
-        network = eqx.apply_updates(network, updates)  # None-safe
+        network = eqx.apply_updates(network, updates)
 
 
 if __name__ == "__main__":
