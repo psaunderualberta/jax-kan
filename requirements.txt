@@ -44,6 +44,7 @@ msgpack==1.1.1
 multidict==6.6.3
 multiprocess==0.70.16
 mypy_extensions==1.1.0
+narwhals==2.0.0
 nest-asyncio==1.6.0
 numpy==2.2.6
 nvidia-cublas-cu12==12.9.1.4
@@ -66,6 +67,7 @@ pandas==2.3.1
 pathspec==0.12.1
 pillow==11.3.0
 platformdirs==4.3.8
+plotly==6.2.0
 propcache==0.3.2
 protobuf==6.31.1
 pyarrow==21.0.0
