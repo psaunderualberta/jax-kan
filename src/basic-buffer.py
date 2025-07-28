@@ -118,13 +118,13 @@ def main():
 
         return LoopState(
             key=key,
-            network=loop_state.network,
+            network=network,
             buffer_state=buffer_state,
             env_obs=next_obs,
             env_state=next_state,
             opt_state=opt_state,
             global_step=loop_state.global_step + 1,
-            episode_num=loop_state.episode_num + done.astype(loop_state.episode_num)
+            episode_num=loop_state.episode_num + done.astype(loop_state.episode_num.dtype)
         )
     
     def eval_step(loop_state: LoopState) -> LoopState:
@@ -135,7 +135,7 @@ def main():
             loop_state
         )
 
-        return loop_state, loop_state.episode_num
+        return loop_state, loop_state.global_step
 
     key, _key = jr.split(key)
     obs, state = env.reset(key, env_params)
@@ -158,7 +158,6 @@ def main():
         env_state=state
     )
 
-
     # Fill buffer
     loop_state = lax.while_loop(
         lambda ls: jnp.logical_not(buffer.can_sample(ls.buffer_state)),
@@ -166,7 +165,7 @@ def main():
         loop_state
     )   
 
-    # Train for 'training_episodes' iterations
+    # Train for 'training_episodes' episodes
     loop_state, ls = lax.scan(
         lambda ls, _: eval_step(ls),
         loop_state,
