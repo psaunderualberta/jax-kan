@@ -34,7 +34,7 @@ def q_epsilon_greedy(q_network, state, epsilon: float, key: chex.PRNGKey) -> tup
 
     q_values = q_network(state)
     explore = jr.uniform(eps_key) < epsilon
-    greedy_action = jnp.argmax(q_values, axis=-1)
+    greedy_action = jnp.argmax(q_values, axis=-1).squeeze()
     action = lax.select(
         explore,
         jr.randint(action_key, (), 0, q_network.num_actions()),

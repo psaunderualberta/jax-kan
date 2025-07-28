@@ -57,7 +57,7 @@ def bspline_multi_control(
             )
             d[j] = (1.0 - alpha) * d[j - 1] + alpha * d[j]
 
-    return d[order].squeeze()
+    return d[order]
 
 
 if __name__ == "__main__":

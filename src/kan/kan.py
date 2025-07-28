@@ -42,3 +42,6 @@ class KAN(eqx.Module):
 
         # Final layer, no ultimate normalization
         return self.layers[-1](x)
+
+    def num_actions(self):
+        return self.layers[-1].w_b.shape[0]

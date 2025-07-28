@@ -32,3 +32,6 @@ class MLP(eqx.Module):
             x = layer(x)
         
         return x
+    
+    def num_actions(self):
+        return self.layers[-1].in_features
