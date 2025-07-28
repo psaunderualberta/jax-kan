@@ -66,8 +66,9 @@ class KANLayer(eqx.Module):
 
         # (in * out * coeff) x (in * num_datapoints) -> (out * num_datapoints)
         stable_grid_points = lax.stop_gradient(self.grid_points)
+        stable_k = lax.stop_gradient(self.k)
         vmapped_bspline = vmap(bspline_multi_control, in_axes=(0, None, 0, None))
-        mapped = vmapped_bspline(x, stable_grid_points, self.control_points, self.k)
+        mapped = vmapped_bspline(x, stable_grid_points, self.control_points, stable_k)
 
         non_summed_activations = biases + self.w_s[:, :, None] * mapped
         summed_activations = jnp.sum(non_summed_activations, axis=0)
