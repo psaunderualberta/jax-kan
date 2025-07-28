@@ -12,15 +12,18 @@ class BufferState(eqx.Module):
     full: bool = False
     ptr: int = 0
 
-
-class Buffer(eqx.Module):
-    def __init__(self, capacity: int) -> BufferState:
-        return BufferState(
+    @classmethod
+    def create(cls, capacity) -> "BufferState":
+        return cls(
             buffer=[None for _ in range(capacity)],
             capacity=capacity,
         )
 
-    def push(self, state: BufferState, el: Any) -> BufferState:
+
+class Buffer(eqx.Module):
+        
+    @classmethod
+    def push(cls, state: BufferState, el: Any) -> BufferState:
         buffer = state.buffer
         ptr = state.ptr
 
@@ -35,7 +38,8 @@ class Buffer(eqx.Module):
             done=done
         )
     
-    def sample(self, state: BufferState, num_elements: int, key: chex.PRNGKey) -> list[Any]:
+    @classmethod
+    def sample(cls, state: BufferState, num_elements: int, key: chex.PRNGKey) -> list[Any]:
         deque = state.deque
         max_idx = lax.select(state.done, state.capacity, state.ptr)
         idxs = jr.permutation(key, max_idx)[:num_elements]
