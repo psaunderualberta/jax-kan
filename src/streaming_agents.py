@@ -1,13 +1,13 @@
 import jax
-from jax import random as jr, numpy as jnp
-import gymnax
-from tqdm import tqdm
-import equinox as eqx
 import optax
+import equinox as eqx
+from jax import random as jr, numpy as jnp
+from tqdm import tqdm
 from util.losses import q_epsilon_greedy, q_td_error, q_huber_loss
-
+from util.funcs import SILU        
 from mlp.mlp import MLP
 from kan.kan import KAN
+
 
 class StreamingAgent:
     """Base class for streaming reinforcement learning agents."""
@@ -319,7 +319,7 @@ class MLPStreamQAgent(NetworkStreamQAgent):
             num_actions = len(act_space['discrete_actions'])
         
         network_dims = [obs_dim] + hidden_dims + [num_actions]
-        network = MLP(network_dims, subkey)
+        network = MLP(network_dims, subkey, SILU())
         
         super().__init__(
             env_wrapper,
