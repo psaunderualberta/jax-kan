@@ -16,8 +16,8 @@ class KANLayer(eqx.Module):
     control_points: chex.Array = None
 
     silu: eqx.Module = None
-    bound: float = 0
-    k: int = 0
+    bound: float = 0.
+    # k: int = 0
 
     def __init__(
         self,
@@ -52,7 +52,7 @@ class KANLayer(eqx.Module):
         # activation
         self.silu = SILU()
         self.bound = num_stds * 1.0
-        self.k = k
+        # self.k = k
 
     def __call__(self, x):
         x = x.T
@@ -66,7 +66,7 @@ class KANLayer(eqx.Module):
 
         # (in * out * coeff) x (in * num_datapoints) -> (out * num_datapoints)
         stable_grid_points = lax.stop_gradient(self.grid_points)
-        stable_k = lax.stop_gradient(self.k)
+        # stable_k = lax.stop_gradient(self.k)
         vmapped_bspline = vmap(bspline_multi_control, in_axes=(0, None, 0, None))
         mapped = vmapped_bspline(x, stable_grid_points, self.control_points, 3)
 

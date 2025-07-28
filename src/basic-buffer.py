@@ -9,7 +9,8 @@ import optax
 from gymnax import make
 from gymnax.environments import environment
 from util import q_epsilon_greedy, q_huber_loss, linear_epsilon_schedule
-from experiments.buffered import Transition, Buffer, BufferState
+import flashbax as fbx
+from typing import Any
 import chex
 
 
@@ -17,7 +18,7 @@ class LoopState(eqx.Module):
     key: chex.PRNGKey
     network: MLP | KAN
     opt_state: optax.GradientTransformation
-    buffer: BufferState
+    buffer_state: Any
     env_obs: chex.PRNGKey
     env_state: environment.Environment
     global_step: int = 0
@@ -40,9 +41,6 @@ def main():
     end_e = 0.01
     decay_duration = 500
 
-    # Create buffer
-    buffer = BufferState.create(10000)
-
     # Initialize network
     key, _key = jr.split(key)
     dims = [obs_space[0], 32, num_actions]
@@ -53,23 +51,33 @@ def main():
     optimizer = optax.adam(0.1)
     opt_state = optimizer.init(network)
 
+    # Create buffer
+    buffer = fbx.make_item_buffer(max_length=10_000, min_length=batch_size, sample_batch_size=batch_size)
+
     def warmup_buffer(loop_state: LoopState) -> LoopState:
         key, _key = jr.split(loop_state.key)
         eps = linear_epsilon_schedule(start_e, end_e, decay_duration, loop_state.episode_num)
-        action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs, eps, _key)
+        action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs.reshape(1, -1), eps, _key)
 
         key, _key = jr.split(key)
         next_obs, next_state, reward, done, _ = env.step(_key, loop_state.env_state, action, env_params)
+        transition = {
+            "obs": obs,
+            "reward": reward,
+            "next_obs": next_obs,
+            "action": action,
+            "done": done,
+        }
 
-        transition = Transition(obs=loop_state.env_obs, action=action, reward=reward, next_obs=next_obs, done=done)
-        buffer = Buffer.push(loop_state.buffer, transition)
+        buffer_state = buffer.add(loop_state.buffer_state, transition)
 
         return LoopState(
             key=key,
             network=loop_state.network,
-            buffer=buffer,
+            buffer_state=buffer_state,
             env_obs=next_obs,
-            next_state=next_state,
+            env_state=next_state,
+            opt_state=loop_state.opt_state,
             global_step=loop_state.global_step + 1,
             episode_num=loop_state.episode_num + done.astype(loop_state.episode_num)
         )
@@ -78,37 +86,42 @@ def main():
     def train_step(loop_state: LoopState) -> LoopState:
         key, _key = jr.split(loop_state.key)
         eps = linear_epsilon_schedule(start_e, end_e, decay_duration, loop_state.episode_num)
-        action = q_epsilon_greedy(loop_state.network, loop_state.env_obs, eps, _key)
+        action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs.reshape(1, -1), eps, _key)
 
         key, _key = jr.split(key)
         next_obs, next_state, reward, done, _ = env.step(_key, loop_state.env_state, action, env_params)
-        next_obs = next_obs.reshape(1, -1)
 
-        transition = Transition(obs=loop_state.env_obs, action=action, reward=reward, next_obs=next_obs, done=done)
-        buffer = Buffer.push(loop_state.buffer, transition)
-
-        training_samples = buffer.sample(batch_size)
+        key, _key = jr.split(key)
+        transition = {
+            "obs": obs,
+            "reward": reward,
+            "next_obs": next_obs,
+            "action": action,
+            "done": done,
+        }
+        training_samples = buffer.sample(loop_state.buffer_state, _key).experience
+        buffer_state = buffer.add(loop_state.buffer_state, transition)
 
         loss, grads = value_and_grad(q_huber_loss)(
             loop_state.network,
-            loop_state.env_obs,
-            action,
-            reward,
-            done,
-            next_obs,
+            training_samples['obs'],
+            training_samples['action'],
+            training_samples['reward'],
+            training_samples['done'],
+            training_samples['next_obs'],
             gamma,
         )
 
         # Update network
-        updates, opt_state = optimizer.update(grads, loop_state.opt_state, network)
-        network = eqx.apply_updates(network, updates)
+        updates, opt_state = optimizer.update(grads, loop_state.opt_state, loop_state.network)
+        network = eqx.apply_updates(loop_state.network, updates)
 
         return LoopState(
             key=key,
             network=loop_state.network,
-            buffer=buffer,
+            buffer_state=buffer_state,
             env_obs=next_obs,
-            next_state=next_state,
+            env_state=next_state,
             opt_state=opt_state,
             global_step=loop_state.global_step + 1,
             episode_num=loop_state.episode_num + done.astype(loop_state.episode_num)
@@ -126,29 +139,39 @@ def main():
 
     key, _key = jr.split(key)
     obs, state = env.reset(key, env_params)
-    obs = obs.reshape(1, -1)
+    dummy_transition = {
+        "obs": obs,
+        "action": 0,
+        "reward": 0.0,
+        "next_obs": obs,
+        "done": False
+    }
+
+    buffer_state = buffer.init(dummy_transition)
+
     loop_state = LoopState(
         key=key,
         network=network,
         opt_state=opt_state,
-        buffer=buffer,
+        buffer_state=buffer_state,
         env_obs=obs,
         env_state=state
     )
 
+
     # Fill buffer
     loop_state = lax.while_loop(
-        lambda ls: jnp.logical_not(ls.buffer.full),
+        lambda ls: jnp.logical_not(buffer.can_sample(ls.buffer_state)),
         warmup_buffer,
         loop_state
     )
 
-    # # Train for 'training_episodes' iterations
-    # loop_state = lax.while_loop(
-    #     lambda ls: ls.episode_num < training_episodes,
-    #     eval_step,
-    #     loop_state
-    # )
+    # Train for 'training_episodes' iterations
+    loop_state = lax.while_loop(
+        lambda ls: ls.episode_num < training_episodes,
+        eval_step,
+        loop_state
+    )
 
     return loop_state
 

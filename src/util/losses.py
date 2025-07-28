@@ -47,8 +47,8 @@ def q_epsilon_greedy(q_network, state, epsilon: float, key: chex.PRNGKey) -> tup
 
 
 def q_td_error(model, state, action, reward, done, next_state, gamma):
-    q = model(state)[action]
-    q_prime = jnp.argmax(model(next_state), axis=0)
+    q = model(state)[:, action]
+    q_prime = jnp.argmax(model(next_state), axis=1)
 
     return (
         reward
@@ -60,7 +60,7 @@ def q_td_error(model, state, action, reward, done, next_state, gamma):
 
 def q_huber_loss(model, state, action, reward, done, next_state, gamma):
     td_error = q_td_error(model, state, action, reward, done, next_state, gamma)
-
+    td_error = td_error.mean()
     return lax.select(
         jnp.abs(td_error) <= 1,
         jnp.abs(td_error) - 0.5,
