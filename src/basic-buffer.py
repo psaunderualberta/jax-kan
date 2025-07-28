@@ -135,7 +135,7 @@ def main():
             loop_state
         )
 
-        return loop_state
+        return loop_state, loop_state.episode_num
 
     key, _key = jr.split(key)
     obs, state = env.reset(key, env_params)
@@ -164,14 +164,16 @@ def main():
         lambda ls: jnp.logical_not(buffer.can_sample(ls.buffer_state)),
         warmup_buffer,
         loop_state
-    )
+    )   
 
     # Train for 'training_episodes' iterations
-    loop_state = lax.while_loop(
-        lambda ls: ls.episode_num < training_episodes,
-        eval_step,
-        loop_state
+    loop_state, ls = lax.scan(
+        lambda ls, _: eval_step(ls),
+        loop_state,
+        length=training_episodes,
     )
+
+    print(ls)
 
     return loop_state
 
