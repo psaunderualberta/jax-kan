@@ -18,3 +18,6 @@ class Table(eqx.Module):
     def __call__(self, x):
         idxs = (x < self.obs_grid).argmax(axis=0)
         return self.q_values[tuple(idxs)]
+
+    def num_actions(self):
+        return self.q_values.shape[-1]
