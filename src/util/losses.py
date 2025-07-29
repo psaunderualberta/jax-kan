@@ -52,7 +52,7 @@ def q_td_error(model, state, action, reward, done, next_state, gamma, target_mod
     if target_model is not None:
         q_prime = jnp.max(vmap(target_model)(next_state), axis=1)
     else:
-        q_prime = jnp.max(vmap(target_model)(next_state), axis=1)
+        q_prime = jnp.max(vmapped_model(next_state), axis=1)
 
     return (
         reward
