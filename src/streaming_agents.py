@@ -1,18 +1,19 @@
 import jax
 import optax
 import equinox as eqx
-from jax import random as jr, numpy as jnp
+from jax import random as jr, numpy as jnp, value_and_grad
 from tqdm import tqdm
 from util.losses import q_epsilon_greedy, q_td_error, q_huber_loss
-from util.funcs import SILU        
 from mlp.mlp import MLP
 from kan.kan import KAN
+from gymnax import make
 
 
 class StreamingAgent:
     """Base class for streaming reinforcement learning agents."""
-    def __init__(self, env_wrapper):
-        self.env_wrapper = env_wrapper
+    def __init__(self, env_name="CartPole-v1"):
+        self.env, self.env_params = make(env_name)
+        self.env_name = env_name
         self.name = "BaseAgent"
     
     def select_action(self, state):
@@ -26,22 +27,21 @@ class StreamingAgent:
     def run_episode(self, max_steps=1000, render=False):
         """Run a single episode."""
         self.key, key_reset = jr.split(self.key)
-        obs, state = self.env_wrapper.reset(key_reset)
+        obs, state = self.env.reset(key_reset, self.env_params)
         
         episode_rewards = []
         episode_td_errors = []
         
         for step in range(max_steps):
-            action_idx = self.select_action(obs)
+            action = self.select_action(obs)
             
             self.key, key_step = jr.split(self.key)
-            env_action = self.env_wrapper.process_action(action_idx)
-            
-            next_obs, next_state, reward, done, info = self.env_wrapper.step(
-                key_step, state, env_action
+            next_obs, next_state, reward, done, info = self.env.step(
+                key_step, state, action, self.env_params
             )
-            
-            td_error = self.update(obs, action_idx, reward, next_obs, done)
+
+            self.key, key_step = jr.split(self.key)
+            td_error = self.update(obs, action, reward, next_obs, done)
             
             episode_rewards.append(reward)
             episode_td_errors.append(float(td_error))
@@ -92,149 +92,33 @@ class StreamingAgent:
         
         return episode_results
 
-class QTableWrapper:
-    """Wrapper around Q-table to make it compatible with network interface."""
-    def __init__(self, q_table, discretize_fn, num_actions):
-        self.q_table = q_table
-        self.discretize_fn = discretize_fn
-        self._num_actions = num_actions
-    
-    def __call__(self, state):
-        """Return Q-values for given state."""
-        state_idx = self.discretize_fn(state)
-        return self.q_table[state_idx]
-    
-    def num_actions(self):
-        """Return number of actions, compatible with losses.py interface."""
-        return self._num_actions
-
-class TabularStreamQAgent(StreamingAgent):
-    """
-    Streaming Q-learning agent with tabular state-action value function.
-    """
-    def __init__(
-        self,
-        env_wrapper,
-        learning_rate=0.1,
-        discount_factor=0.99,
-        epsilon=0.1,
-        seed=0
-    ):
-        super().__init__(env_wrapper)
-        self.name = "TabularQAgent"
-        self.alpha = learning_rate
-        self.gamma = discount_factor
-        self.epsilon = epsilon
-        self.key = jr.PRNGKey(seed)
-        
-        obs_space = env_wrapper.get_observation_space()
-        act_space = env_wrapper.get_action_space()
-        
-        self.obs_dim = obs_space['dim']
-        self.num_bins = obs_space['num_bins']
-        
-        if act_space.get('is_discrete', False):
-            self.action_is_discrete = True
-            self.num_actions = act_space['num_bins']
-        else:
-            self.action_is_discrete = False
-            self.discrete_actions = act_space['discrete_actions']
-            self.num_actions = len(self.discrete_actions)
-        
-        q_table_shape = tuple([self.num_bins] * self.obs_dim + [self.num_actions])
-        self.q_table = jnp.zeros(q_table_shape)
-        
-        self.q_wrapper = QTableWrapper(
-            self.q_table, 
-            self.discretize_state, 
-            self.num_actions
-        )
-        
-        self.episode_count = 0
-        self.total_steps = 0
-        self.total_rewards = []
-        self.avg_td_errors = []
-    
-    def discretize_state(self, state):
-        """Convert continuous state to discrete indices for Q-table lookup."""
-        indices = self.env_wrapper.discretize_state(state)
-        return tuple(indices)
-    
-    def select_action(self, state):
-        """Epsilon-greedy action selection using utility function."""
-        self.key, subkey = jr.split(self.key)
-        
-        action, _, _ = q_epsilon_greedy(
-            self.q_wrapper, 
-            state, 
-            self.epsilon, 
-            subkey
-        )
-        
-        return action
-    
-    def update(self, state, action_idx, reward, next_state, done):
-        """Update Q-value using the Q-learning update rule."""
-        state_idx = self.discretize_state(state)
-        next_state_idx = self.discretize_state(next_state)
-        
-        current_q = self.q_table[state_idx][action_idx]
-        next_max_q = jnp.max(self.q_table[next_state_idx]) if not done else 0.0
-        td_target = reward + self.gamma * next_max_q
-        td_error = td_target - current_q
-        
-        new_q = current_q + self.alpha * td_error
-        
-        idx = state_idx + (action_idx,)
-        self.q_table = self.q_table.at[idx].set(new_q)
-        
-        self.q_wrapper = QTableWrapper(
-            self.q_table, 
-            self.discretize_state, 
-            self.num_actions
-        )
-        
-        return td_error
-
-
 class NetworkStreamQAgent(StreamingAgent):
     """
     Base class for streaming Q-learning agents.
     """
     def __init__(
         self,
-        env_wrapper,
         network,
+        env_name="CartPole-v1",
         learning_rate=0.001,
         discount_factor=0.99,
         epsilon=0.1,
         seed=0
     ):
-        super().__init__(env_wrapper)
+        super().__init__(env_name)
         self.name = "NetworkQAgent"
         self.alpha = learning_rate
         self.gamma = discount_factor
         self.epsilon = epsilon
         self.key = jr.PRNGKey(seed)
         
-        obs_space = env_wrapper.get_observation_space()
-        act_space = env_wrapper.get_action_space()
-        
-        self.obs_dim = obs_space['dim']
-        
-        if act_space.get('is_discrete', False):
-            self.action_is_discrete = True
-            self.num_actions = act_space['num_bins']
-        else:
-            self.action_is_discrete = False
-            self.discrete_actions = act_space['discrete_actions']
-            self.num_actions = len(self.discrete_actions)
+        obs_space = self.env.observation_space(self.env_params)
+        self.obs_dim = len(obs_space.shape)
+        self.num_actions = self.env.num_actions
         
         self.network = network
-        # ensure network has num_actions method for epsilon-greedy
-        if not hasattr(self.network, 'num_actions'):
-            self.network.num_actions = lambda: self.num_actions
         
+        # optimizer
         self.optimizer = optax.adam(learning_rate)
         self.opt_state = self.optimizer.init(self.network)
         
@@ -259,10 +143,10 @@ class NetworkStreamQAgent(StreamingAgent):
     
     def update(self, state, action_idx, reward, next_state, done):
         """Update Q-function approximator using TD learning."""
-        state_array = jnp.array(state)
-        next_state_array = jnp.array(next_state)
+        state_array = jnp.array(state).reshape(1, -1)
+        next_state_array = jnp.array(next_state).reshape(1, -1)
         
-        td_error = q_td_error(
+        loss, grads = value_and_grad(q_huber_loss)(
             self.network,
             state_array,
             action_idx,
@@ -272,25 +156,13 @@ class NetworkStreamQAgent(StreamingAgent):
             self.gamma
         )
         
-        def loss_fn(network):
-            return q_huber_loss(
-                network,
-                state_array,
-                action_idx,
-                reward,
-                done,
-                next_state_array,
-                self.gamma
-            )
-        
-        grads = eqx.filter_grad(loss_fn)(self.network)
         
         updates, self.opt_state = self.optimizer.update(
             grads, self.opt_state, self.network
         )
         self.network = eqx.apply_updates(self.network, updates)
         
-        return td_error
+        return loss
 
 class MLPStreamQAgent(NetworkStreamQAgent):
     """
@@ -298,32 +170,31 @@ class MLPStreamQAgent(NetworkStreamQAgent):
     """
     def __init__(
         self,
-        env_wrapper,
+        env_name="CartPole-v1",
         hidden_dims=[64, 32],
         learning_rate=0.001,
         discount_factor=0.99,
         epsilon=0.1,
         seed=0
     ):
+        env, env_params = make(env_name)
+        obs_space = env.observation_space(env_params)
+        obs_dim = len(obs_space.shape)
+        if obs_dim == 0:
+            obs_dim = 1
+        else:
+            obs_dim = obs_space.shape[0]
+        
+        num_actions = env.num_actions
+        
         key = jr.PRNGKey(seed)
         key, subkey = jr.split(key)
-        
-        obs_space = env_wrapper.get_observation_space()
-        act_space = env_wrapper.get_action_space()
-        
-        obs_dim = obs_space['dim']
-        
-        if act_space.get('is_discrete', False):
-            num_actions = act_space['num_bins']
-        else:
-            num_actions = len(act_space['discrete_actions'])
-        
         network_dims = [obs_dim] + hidden_dims + [num_actions]
-        network = MLP(network_dims, subkey, SILU())
+        network = MLP(network_dims, subkey)
         
         super().__init__(
-            env_wrapper,
             network,
+            env_name,
             learning_rate,
             discount_factor,
             epsilon,
