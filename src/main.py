@@ -16,8 +16,8 @@ def main():
 
     # Initialize network
     dims = [x.shape[1], 32, y.shape[1]]
-    # network = KAN(dims, 7, 3, 3, _key)
-    network = MLP(dims, _key)
+    network = KAN(dims, 7, 3, 3, _key)
+    # network = MLP(dims, _key)
 
     # optimizer
     batch_size = 512
