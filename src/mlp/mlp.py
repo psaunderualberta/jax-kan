@@ -1,5 +1,6 @@
 import equinox as eqx
 import jax.random as jr
+import jax.nn
 from util import SILU
 import chex
 
@@ -20,7 +21,7 @@ class MLP(eqx.Module):
                 )
             )
 
-            self.layers.append(activation())
+            # self.layers.append(jax.nn.relu)
 
             # move to next layer
             in_dim = out_dim
@@ -32,6 +33,7 @@ class MLP(eqx.Module):
     def __call__(self, x):
         for layer in self.layers[:-1]:
             x = layer(x)
+            x = jax.nn.relu(x)
         
         return self.layers[-1](x)
     

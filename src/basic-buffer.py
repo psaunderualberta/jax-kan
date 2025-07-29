@@ -33,7 +33,7 @@ def main():
     env, env_params = make("CartPole-v1")
     obs_space = env.observation_space(env_params).shape
     num_actions = env.num_actions
-    training_episodes = 1_000
+    training_episodes = 600
     gamma = 0.99
 
     # Create eps-decay settings
@@ -43,17 +43,17 @@ def main():
 
     # Initialize network
     key, _key = jr.split(key)
-    dims = [obs_space[0], 32, num_actions]
+    dims = [obs_space[0], 128, num_actions]
     # network = KAN(dims, 7, 3, 3, _key)
     network = MLP(dims, _key)
 
     # optimizer
-    batch_size = 1
-    optimizer = optax.adam(0.05)
+    batch_size = 512
+    optimizer = optax.adam(3e-4)
     opt_state = optimizer.init(network)
 
     # Create buffer
-    buffer = fbx.make_item_buffer(max_length=1, min_length=batch_size, sample_batch_size=batch_size)
+    buffer = fbx.make_item_buffer(max_length=10000, min_length=batch_size, sample_batch_size=batch_size)
 
     def warmup_buffer(loop_state: LoopState) -> LoopState:
         key, _key = jr.split(loop_state.key)

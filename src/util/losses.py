@@ -48,8 +48,8 @@ def q_epsilon_greedy(q_network, state, epsilon: float, key: chex.PRNGKey) -> tup
 
 def q_td_error(model, state, action, reward, done, next_state, gamma):
     vmapped_model = vmap(model)
-    q = vmapped_model(state)[:, action]
-    q_prime = jnp.argmax(vmapped_model(next_state), axis=1)
+    q = vmapped_model(state)[jnp.arange(state.shape[0]), action]
+    q_prime = jnp.max(vmapped_model(next_state), axis=1)
 
     return (
         reward
