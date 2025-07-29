@@ -69,3 +69,14 @@ def q_huber_loss(model, state, action, reward, done, next_state, gamma, target_m
         jnp.abs(td_error) - 0.5,
         0.5 * td_error ** 2
     )
+
+
+def get_delta(q_network, scaled_reward, gamma, done, obs, action, next_obs):
+    """Compute TD error for StreamQ algorithm."""
+    q_sp = q_network(next_obs).max()
+    q_sa = q_network(obs)[action]
+    return (
+        scaled_reward
+        + (1 - done) * lax.stop_gradient(gamma * q_sp)
+        - q_sa
+    )
