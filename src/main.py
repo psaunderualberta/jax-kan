@@ -1,7 +1,8 @@
 from util import DATALOADERS
 from kan import KAN
+from mlp import MLP
 from jax import random as jr, numpy as jnp
-from util import non_vmap_cce_loss, subset_classification_accuracy
+from util import cce_loss, subset_classification_accuracy
 import equinox as eqx
 from tqdm import tqdm
 import optax
@@ -15,11 +16,12 @@ def main():
 
     # Initialize network
     dims = [x.shape[1], 32, y.shape[1]]
-    network = KAN(dims, 7, 3, 3, _key)
+    # network = KAN(dims, 7, 3, 3, _key)
+    network = MLP(dims, _key)
 
     # optimizer
     batch_size = 512
-    optimizer = optax.adam(0.1)
+    optimizer = optax.adam(0.01)
     opt_state = optimizer.init(network)
 
     # Create visual indicator of progress
@@ -34,7 +36,7 @@ def main():
 
         # Compute loss, accuracy, gradients
         key, _key = jr.split(key)
-        loss, grads = non_vmap_cce_loss(network, batch_x, batch_y)
+        loss, grads = cce_loss(network, batch_x, batch_y)
         accuracy = subset_classification_accuracy(network, x, y, 0.01, _key)
 
         # Update iterator description

@@ -43,12 +43,13 @@ def main():
 
     # Initialize network
     key, _key = jr.split(key)
-    dims = [obs_space[0], 32, num_actions]
-    network = KAN(dims, 7, 3, 3, _key)
+    dims = [obs_space[0], 32, 32, num_actions]
+    # network = KAN(dims, 7, 3, 3, _key)
+    network = MLP(dims, _key)
 
     # optimizer
     batch_size = 512
-    optimizer = optax.adam(0.1)
+    optimizer = optax.adam(0.005)
     opt_state = optimizer.init(network)
 
     # Create buffer

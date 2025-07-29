@@ -7,15 +7,15 @@ import chex
 
 @eqx.filter_jit
 @eqx.filter_value_and_grad
-def non_vmap_cce_loss(model: eqx.Module, x: chex.Array, y: chex.Array):
-    pred_y = model(x).squeeze()
+def cce_loss(model: eqx.Module, x: chex.Array, y: chex.Array):
+    pred_y = vmap(model)(x).squeeze()
 
     return softmax_cross_entropy(pred_y, y).mean()
 
 
 @eqx.filter_jit
 def classification_accuracy(model, x, y):
-    pred_y = model(x)
+    pred_y = vmap(model)(x)
     pred_y_int = jnp.argmax(pred_y, axis=1)
     y_int = jnp.argmax(y, axis=1)
     return jnp.mean(pred_y_int == y_int) * 100

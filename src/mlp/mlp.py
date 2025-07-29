@@ -5,6 +5,8 @@ import chex
 
 
 class MLP(eqx.Module):
+    layers: list[eqx.Module]
+
     def __init__(self, dims: chex.Array, key: chex.PRNGKey, activation: eqx.Module = SILU):
         in_dim = dims[0]
         self.layers = []
@@ -18,7 +20,7 @@ class MLP(eqx.Module):
                 )
             )
 
-            self.layers.append(activation)
+            self.layers.append(activation())
 
             # move to next layer
             in_dim = out_dim
@@ -28,10 +30,10 @@ class MLP(eqx.Module):
         )
 
     def __call__(self, x):
-        for layer in self.layers:
+        for layer in self.layers[:-1]:
             x = layer(x)
         
-        return x
+        return self.layers[-1](x)
     
     def num_actions(self):
         return self.layers[-1].in_features
