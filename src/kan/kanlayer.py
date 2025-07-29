@@ -59,18 +59,19 @@ class KANLayer(eqx.Module):
         bound = lax.stop_gradient(self.bound)
         x = jnp.clip(x, min=-bound, max=bound)
 
-        # (1,out) x (in * num_datapoints) -> (in * out * num_datapoints)
-        biases = jnp.einsum("ij,ik->ijk", self.w_b, self.silu(x))  # TODO: Correct?
+        # (in * out) x (in * num_datapoints) -> (in * out * num_datapoints)
+        biases = self.w_b * self.silu(x).reshape(-1, 1)
 
         # (in * out * coeff) x (in * num_datapoints) -> (out * num_datapoints)
         stable_grid_points = lax.stop_gradient(self.grid_points)
         # stable_k = lax.stop_gradient(self.k)
-        mapped = bspline_multi_control(x, stable_grid_points, self.control_points, 3)
+        vmapped_bspline = vmap(bspline_multi_control, in_axes=(0, None, 0, None))
+        mapped = vmapped_bspline(x, stable_grid_points, self.control_points, 3)
 
-        non_summed_activations = biases + self.w_s[:, :, None] * mapped
+        non_summed_activations = biases + self.w_s * mapped
         summed_activations = jnp.sum(non_summed_activations, axis=0)
 
-        return summed_activations.T
+        return summed_activations
 
 
 if __name__ == "__main__":

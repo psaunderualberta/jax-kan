@@ -36,8 +36,8 @@ class KAN(eqx.Module):
 
             # Layer normalization to ensure values stay within appropriate
             # bounds (i.e. spline range)
-            x = (x - x.mean(axis=1, keepdims=True)) / jnp.sqrt(
-                x.var(axis=1, keepdims=True) + 1e-5
+            x = (x - x.mean(keepdims=True)) / jnp.sqrt(
+                x.var(keepdims=True) + 1e-5
             )
 
         # Final layer, no ultimate normalization
