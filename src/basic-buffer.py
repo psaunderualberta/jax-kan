@@ -2,7 +2,7 @@ from util import DATALOADERS
 from kan import KAN
 from mlp import MLP
 from jax import random as jr, numpy as jnp, lax, value_and_grad
-from util import non_vmap_cce_loss, subset_classification_accuracy
+from util import subset_classification_accuracy
 import equinox as eqx
 from tqdm import tqdm
 import optax
@@ -43,27 +43,27 @@ def main():
 
     # Initialize network
     key, _key = jr.split(key)
-    dims = [obs_space[0], 32, 32, num_actions]
+    dims = [obs_space[0], 32, num_actions]
     # network = KAN(dims, 7, 3, 3, _key)
     network = MLP(dims, _key)
 
     # optimizer
-    batch_size = 512
-    optimizer = optax.adam(0.005)
+    batch_size = 1
+    optimizer = optax.adam(0.05)
     opt_state = optimizer.init(network)
 
     # Create buffer
-    buffer = fbx.make_item_buffer(max_length=10_000, min_length=batch_size, sample_batch_size=batch_size)
+    buffer = fbx.make_item_buffer(max_length=1, min_length=batch_size, sample_batch_size=batch_size)
 
     def warmup_buffer(loop_state: LoopState) -> LoopState:
         key, _key = jr.split(loop_state.key)
         eps = linear_epsilon_schedule(start_e, end_e, decay_duration, loop_state.episode_num)
-        action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs.reshape(1, -1), eps, _key)
+        action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs, eps, _key)
 
         key, _key = jr.split(key)
         next_obs, next_state, reward, done, _ = env.step(_key, loop_state.env_state, action, env_params)
         transition = {
-            "obs": obs,
+            "obs": loop_state.env_obs,
             "reward": reward,
             "next_obs": next_obs,
             "action": action,
@@ -87,14 +87,14 @@ def main():
     def train_step(loop_state: LoopState) -> LoopState:
         key, _key = jr.split(loop_state.key)
         eps = linear_epsilon_schedule(start_e, end_e, decay_duration, loop_state.episode_num)
-        action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs.reshape(1, -1), eps, _key)
+        action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs, eps, _key)
 
         key, _key = jr.split(key)
         next_obs, next_state, reward, done, _ = env.step(_key, loop_state.env_state, action, env_params)
 
         key, _key = jr.split(key)
         transition = {
-            "obs": obs,
+            "obs": loop_state.env_obs,
             "reward": reward,
             "next_obs": next_obs,
             "action": action,
