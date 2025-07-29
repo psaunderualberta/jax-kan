@@ -21,7 +21,7 @@ class MLP(eqx.Module):
                 )
             )
 
-            # self.layers.append(jax.nn.relu)
+            self.layers.append(activation())
 
             # move to next layer
             in_dim = out_dim
@@ -33,7 +33,6 @@ class MLP(eqx.Module):
     def __call__(self, x):
         for layer in self.layers[:-1]:
             x = layer(x)
-            x = jax.nn.relu(x)
         
         return self.layers[-1](x)
     

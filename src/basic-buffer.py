@@ -1,20 +1,17 @@
-from util import DATALOADERS
 from kan import KAN
 from mlp import MLP
+from tabular import Table
 from jax import random as jr, numpy as jnp, lax, value_and_grad, debug
-from util import subset_classification_accuracy
 import equinox as eqx
 from tqdm import tqdm
 import optax
 from gymnax import make
 from gymnax.environments import environment
-from util import q_epsilon_greedy, q_huber_loss, linear_epsilon_schedule, mix_pytrees
+from util import q_epsilon_greedy, q_huber_loss, linear_epsilon_schedule, mix_pytrees, sample_mean_var
 import flashbax as fbx
 from typing import Any
 import chex
-from tabular import Table
-import plotly.express as px
-import plotly.io as pio
+import wandb
 
 
 class LoopState(eqx.Module):
@@ -29,44 +26,48 @@ class LoopState(eqx.Module):
     episode_num: int = 0
 
 
-def main():
+def main(conf=None):
+    if conf is None:
+        wandb.init()
+        conf = wandb.config
+
     # Create Key
-    key = jr.PRNGKey(0)
+    key = jr.PRNGKey(conf.key)
 
     # Create environment
-    env, env_params = make("CartPole-v1")
+    env, env_params = make(conf.env_name)
     obs_dims = env.observation_space(env_params)
     obs_space = obs_dims.shape
     num_actions = env.num_actions
-    training_episodes = 10_000
+    training_episodes = conf.training_episodes
     gamma = 0.99
 
     # Create eps-decay settings
-    start_e = 1.0
-    end_e = 0.01
-    decay_duration = 5_000
-    tau = 0.005
+    start_e = conf.start_e
+    end_e = conf.end_e
+    decay_duration = conf.decay_duration
+    tau = conf.tau
 
     # Initialize network
     key, _key = jr.split(key)
-    dims = [obs_space[0], 128, num_actions]
-    network = KAN(dims, 7, 3, 3, _key)
-    # network = MLP(dims, _key)
+    dims = [obs_space[0], *conf.hidden_layers, num_actions]
+    # network = KAN(dims, 7, 3, 3, _key)
+    network = MLP(dims, _key)
     target_network = network
     # a = jnp.asarray([-2.4, -2.4, -0.21, -1.0])
     # network = Table(a, -a, 10, env.action_space(env_params).n, env_params.max_steps_in_episode)
 
     # optimizer
-    batch_size = 128
-    optimizer = optax.adamw(1e-4)
+    batch_size = conf.batch_size
+    optimizer = optax.adamw(conf.lr)
     opt_state = optimizer.init(network)
 
     # Create buffer
-    buffer = fbx.make_item_buffer(max_length=10_000, min_length=batch_size, sample_batch_size=batch_size)
+    buffer = fbx.make_item_buffer(max_length=conf.buffer_length, min_length=batch_size, sample_batch_size=batch_size)
 
     def warmup_buffer(loop_state: LoopState) -> LoopState:
         key, _key = jr.split(loop_state.key)
-        eps = linear_epsilon_schedule(start_e, end_e, decay_duration, loop_state.episode_num)
+        eps = linear_epsilon_schedule(start_e, end_e, decay_duration * training_episodes, loop_state.episode_num)
         action, _, _ = q_epsilon_greedy(loop_state.network, loop_state.env_obs, eps, _key)
 
         key, _key = jr.split(key)
@@ -153,11 +154,6 @@ def main():
             loop_state
         )
 
-        debug.print("{} {:.2f} {}",
-                    loop_state.episode_num,
-                    linear_epsilon_schedule(start_e, end_e, decay_duration, loop_state.episode_num),
-                    loop_state.global_step - bls.global_step)
-
         return loop_state, loop_state.global_step
 
     key, _key = jr.split(key)
@@ -197,11 +193,78 @@ def main():
         length=training_episodes,
     )
 
-    fig = px.line(x=jnp.arange(ls.shape[0]-1), y=ls[1:] - ls[:-1])
-    pio.write_image(fig, "test.pdf", format="pdf")
+    episode_lengths = ls[1:] - ls[:-1]
+
+    window_size = 20
+    for i, length in enumerate(episode_lengths):
+        if i >= window_size:
+            window = episode_lengths[i-window_size:i]
+        else:
+            window = jnp.zeros(1)
+    
+        wandb.log({
+            "length": length,
+            "length mean":  window.mean(),
+            "length var": window.var(),
+        })
+
+    wandb.finish()
 
     return loop_state
 
 
 if __name__ == "__main__":
-    main()
+
+    # training_episodes = 10_000
+    # gamma = 0.99
+
+    # # Create eps-decay settings
+    # start_e = 1.0
+    # end_e = 0.01
+    # decay_duration = 5_000
+    # tau = 0.005
+
+    # # Initialize network
+    # key, _key = jr.split(key)
+    # dims = [obs_space[0], 128, num_actions]
+    # # network = KAN(dims, 7, 3, 3, _key)
+    # network = MLP(dims, _key)
+    # target_network = network
+    # # a = jnp.asarray([-2.4, -2.4, -0.21, -1.0])
+    # # network = Table(a, -a, 10, env.action_space(env_params).n, env_params.max_steps_in_episode)
+
+    # # optimizer
+    # batch_size = 128
+    # optimizer = optax.adamw(1e-4)
+    # opt_state = optimizer.init(network)
+
+    # # Create buffer
+    # buffer = fbx.make_item_buffer(max_length=10_000, min_length=batch_size, sample_batch_size=batch_size)
+
+    mlp_sweep_configuration = {
+        "method": "random",
+        "name": "sweep",
+        "metric": {"goal": "maximize", "name": "length mean"},
+        "parameters": {
+            "env_name": {"values": ["CartPole-v1"]},
+            "key": {"min": 0, "max": 10**6, "distribution": "int_uniform"},
+            "batch_size": {"values": [16, 32, 64, 128, 512]},
+            "buffer_length": {"values": [512, 1024, 4096, 10_000]},
+            "training_episodes": {"values": [5_000, 10_000, 50_000, 100_000]},
+            "lr": {"max": 1e-2, "min": 1e-5, "distribution": "log_uniform_values"},
+            "hidden_layers": {"values": [
+                (32,),
+                (64,),
+                (128,),
+                (32, 32),
+                (128, 128),
+            ]},
+            "start_e": {"values": [1.0]},
+            "end_e": {"min": 0.01, "max": 0.2},
+            "decay_duration": {"min": 0.5, "max": 0.95},
+            "tau": {"min": 0.0005, "max": 0.1, "distribution": "log_uniform_values"}
+        },
+    }
+
+    sweep_id = wandb.sweep(sweep=mlp_sweep_configuration, entity="kan_rl", project="Buffer-test")
+    wandb.agent(sweep_id=sweep_id, function=main, count=500)

@@ -21,3 +21,14 @@ def mix_pytrees(a, b, tau=0.005):
         return a_ * tau + b_ * (1 - tau)
     
     return jt.map(mix, a, b, is_leaf=lambda x: x is None)
+
+
+def sample_mean_var(statistic, mu, p, count):
+    """
+    See the 'Stream-Q' paper. Online computation of running mean and variance. 
+    """
+    count += 1
+    mu_bar = mu + (statistic - mu) / count
+    p = p + (statistic - mu) * (statistic - mu_bar)
+    var = 1 if count < 2 else p / (count - 1)
+    return mu_bar, var, count
