@@ -42,6 +42,9 @@ def setup_sweep(conf):
             "training_steps": {"values": conf.training_steps},
             "num_evals": {"values": conf.num_evals},
             "lr": {"max": 1e-2, "min": 1e-5, "distribution": "log_uniform_values"},
+            "network_type": {"values": conf.network_type},
+            "KAN_grid": {"values": conf.KAN_grid},
+            "KAN_num_stds": {"values": conf.KAN_num_stds},
             "hidden_layers": {"values": conf.hidden_layers},
             "start_e": {"values": [conf.start_e]},
             "end_e": {"min": conf.end_e_min, "max": conf.end_e_max},
@@ -58,8 +61,12 @@ def main(conf=None):
     if conf is None:  # Only when calling 'main' via wandb sweep
         wandb.init()
         conf = wandb.config
+        use_wandb = True
     elif conf.wandb:
         wandb.init(entity="kan_rl", project="Buffer-test", config=conf)
+        use_wandb = True
+    else:
+        use_wandb = False
     
     # Create Key
     key = jr.PRNGKey(conf.key)
@@ -83,8 +90,13 @@ def main(conf=None):
     # Initialize network
     key, _key = jr.split(key)
     dims = [obs_space[0], *conf.hidden_layers, num_actions]
-    # network = KAN(dims, 7, 3, 3, _key)
-    network = MLP(dims, _key)
+    if conf.network_type == "MLP":
+        network = MLP(dims, _key)
+    elif conf.network_type == "KAN":
+        kan_order = 3
+        network = KAN(dims, conf.KAN_grid, kan_order, conf.KAN_num_stds, _key)
+    else:
+        raise ValueError("Network type {} not known".format(conf.network_type))
     target_network = network
     # a = jnp.asarray([-2.4, -2.4, -0.21, -1.0])
     # network = Table(a, -a, 10, env.action_space(env_params).n, env_params.max_steps_in_episode)
@@ -274,7 +286,7 @@ def main(conf=None):
             "Length": ep_lengths.tolist(),
         }
     
-        if conf.wandb:
+        if use_wandb:
             wandb.log({
                 "reward-mean": ep_rewards.mean(),
                 "reward-var": ep_rewards.var(),
@@ -282,7 +294,7 @@ def main(conf=None):
                 "length-var": ep_lengths.var(),
             }, step=eval_step_size * (i + 1))
 
-    if conf.wandb:
+    if use_wandb:
         wandb.log({"df": wandb.Table(dataframe=df)})
         wandb.finish()
 
@@ -300,9 +312,12 @@ if __name__ == "__main__":
     run_parser.add_argument("--key", default=0, type=int, help="The JAX PRNG key")
     run_parser.add_argument("--batch_size", default=512, type=int, help="The replay batch size")
     run_parser.add_argument("--buffer-length", default=10_000, type=int, help="The Buffer Replay Length")
-    run_parser.add_argument("--training-steps", default=10_000, type=int, help="The # of steps to train")
-    run_parser.add_argument("--num-evals", default=10_000, type=int, help="The # of evaluation steps, evenly spaced")
+    run_parser.add_argument("--training-steps", default=600_000, type=int, help="The # of steps to train")
+    run_parser.add_argument("--num-evals", default=250, type=int, help="The # of evaluation steps, evenly spaced")
     run_parser.add_argument("--lr", default=1e-3, type=float, help="The Learning Rate")
+    run_parser.add_argument("--network-type", default="MLP", choices=["MLP", "KAN"], type=str)
+    run_parser.add_argument("--KAN-grid", default=7, type=int, help="The # of grid points within each KAN layer")
+    run_parser.add_argument("--KAN-num-stds", default=3, type=int, help="The number of stds parameterised within each KAN layer")
     run_parser.add_argument("--hidden_layers", default=(32,), type=tuple[int])
     run_parser.add_argument("--start_e", default=1.0, type=float, )
     run_parser.add_argument("--end_e", default=0.01, type=float, )
@@ -321,6 +336,9 @@ if __name__ == "__main__":
     run_parser.add_argument("--num-evals", default=(250,), type=int, help="The # of evaluation steps, evenly spaced")
     run_parser.add_argument("--lr-min", default=1e-5, type=float, help="The Learning Rate Minimum")
     run_parser.add_argument("--lr-max", default=1e-2, type=float, help="The Learning Rate Maximum")
+    run_parser.add_argument("--network-type", default=("MLP",), choices=["MLP", "KAN"], type=str, nargs="+")
+    run_parser.add_argument("--KAN-grid", default=[3, 5, 7, 10, 15], type=int, help="The # of grid points within each KAN layer")
+    run_parser.add_argument("--KAN-num-stds", default=[1, 2, 3], type=int, help="The number of stds parameterised within each KAN layer")
     run_parser.add_argument("--hidden_layers", default=((32,),(64,),(128,),(32, 32),(128, 128)), type=tuple[int], nargs="+")
     run_parser.add_argument("--start_e", default=1.0, type=float)
     run_parser.add_argument("--end_e-min", default=0.01, type=float)
