@@ -12,7 +12,9 @@ import flashbax as fbx
 from typing import Any
 import chex
 import wandb
-from functools import partial
+import argparse
+from pprint import pprint
+import pandas as pd
 
 
 class LoopState(eqx.Module):
@@ -27,11 +29,53 @@ class LoopState(eqx.Module):
     episode_num: int = 0
 
 
+def setup_sweep(conf):
+    # run_parser.add_argument("--env_name", default="CartPole-v1", type=str, help="The RL Environment", nargs="+")
+    # run_parser.add_argument("--batch_size", default=(16, 32, 64, 128, 512), type=tuple[int], help="The replay batch size", nargs="+")
+    # run_parser.add_argument("--buffer-length", default=(512, 1024, 4096, 10_000), type=tuple[int], help="The Buffer Replay Length", nargs="+")
+    # run_parser.add_argument("--training_episodes", default=25_000, type=int, help="The # of episodes to train", nargs="+")
+    # run_parser.add_argument("--lr-min", default=1e-5, type=float, help="The Learning Rate Minimum")
+    # run_parser.add_argument("--lr-max", default=1e-2, type=float, help="The Learning Rate Maximum")
+    # run_parser.add_argument("--hidden_layers", default=((32,),), type=tuple[int], nargs="+")
+    # run_parser.add_argument("--start_e", default=1.0, type=float)
+    # run_parser.add_argument("--end_e-min", default=0.01, type=float)
+    # run_parser.add_argument("--end_e-max", default=0.2, type=float)
+    # run_parser.add_argument("--decay_duration-min", default=0.5, type=float)
+    # run_parser.add_argument("--decay_duration-max", default=0.95, type=float)
+    # run_parser.add_argument("--tau-min", default=5e-4, help="The minimum mixing parameter for updating the target network. ")
+    # run_parser.add_argument("--tau-max", default=0.1, help="The maximum mixing parameter for updating the target network. ")
+
+    mlp_sweep_configuration = {
+        "method": "random",
+        "name": "sweep",
+        "metric": {"goal": "maximize", "name": "reward-mean"},
+        "parameters": {
+            "env_name": {"values": [conf.env_name]},
+            "key": {"min": 0, "max": 10**6, "distribution": "int_uniform"},
+            "batch_size": {"values": conf.batch_size},
+            "buffer_length": {"values": conf.buffer_length},
+            "training_episodes": {"values": conf.training_episodes},
+            "lr": {"max": 1e-2, "min": 1e-5, "distribution": "log_uniform_values"},
+            "hidden_layers": {"values": conf.hidden_layers},
+            "start_e": {"values": [conf.start_e]},
+            "end_e": {"min": conf.end_e_min, "max": conf.end_e_max},
+            "decay_duration": {"min": conf.decay_duration_min, "max": conf.decay_duration_max},
+            "tau": {"min": conf.tau_min, "max": conf.tau_max, "distribution": "log_uniform_values"}
+        },
+    }
+
+    pprint(mlp_sweep_configuration)
+    # sweep_id = wandb.sweep(sweep=mlp_sweep_configuration, entity="kan_rl", project="Buffer-test")
+    # wandb.agent(sweep_id=sweep_id, function=main, count=1)
+
+
 def main(conf=None):
-    if conf is None:
+    if conf is None:  # Only when calling 'main' via wandb sweep
         wandb.init()
         conf = wandb.config
-
+    elif conf.wandb:
+        wandb.init(entity="kan_rl", project="Buffer-test", config=conf)
+    
     # Create Key
     key = jr.PRNGKey(conf.key)
 
@@ -66,7 +110,6 @@ def main(conf=None):
     # Create buffer
     buffer = fbx.make_item_buffer(max_length=conf.buffer_length, min_length=batch_size, sample_batch_size=batch_size)
 
-    @partial(vmap, in_axes=(None, 0))
     def evaluate(network, key):
         key, _key = jr.split(key)
         obs, state = env.reset(_key, env_params)
@@ -184,7 +227,14 @@ def main(conf=None):
 
         eval_keys = jr.split(loop_state.key, 50)
 
-        evaluations = evaluate(loop_state.network, eval_keys)
+        vmapped_eval = vmap(evaluate, in_axes=(None, 0))
+        evaluations = vmapped_eval(loop_state.network, eval_keys)
+
+        debug.print("Ep: {}, Avg. Reward: {:.2f}, Avg. Length: {:.2f}",
+                    loop_state.episode_num,
+                    evaluations[0].mean(),
+                    evaluations[1].mean()
+        )
 
         return loop_state, evaluations
 
@@ -227,49 +277,97 @@ def main(conf=None):
 
     rewards, lengths = evaluations
 
-    for i in range(rewards.shape[0]):
+    df = pd.DataFrame(columns=["Reward", "Length"])
 
+    for i in range(rewards.shape[0]):
         ep_rewards = rewards[i, :]
         ep_lengths = lengths[i, :]
-    
-        wandb.log({
-            "reward-mean": ep_rewards.mean(),
-            "reward-var": ep_rewards.var(),
-            "length-mean":  ep_lengths.mean(),
-            "length-var": ep_lengths.var(),
-        })
 
-    wandb.finish()
+        df.loc[len(df)] = {
+            "Reward": ep_rewards.tolist(),
+            "Length": ep_lengths.tolist(),
+        }
+    
+        if conf.wandb:
+            wandb.log({
+                "reward-mean": ep_rewards.mean(),
+                "reward-var": ep_rewards.var(),
+                "length-mean":  ep_lengths.mean(),
+                "length-var": ep_lengths.var(),
+            })
+
+    if conf.wandb:
+        wandb.log({"df": wandb.Table(dataframe=df)})
+        wandb.finish()
 
     return loop_state
 
 
 if __name__ == "__main__":
 
-    mlp_sweep_configuration = {
-        "method": "random",
-        "name": "sweep",
-        "metric": {"goal": "maximize", "name": "length mean"},
-        "parameters": {
-            "env_name": {"values": ["CartPole-v1"]},
-            "key": {"min": 0, "max": 10**6, "distribution": "int_uniform"},
-            "batch_size": {"values": [16, 32, 64, 128, 512]},
-            "buffer_length": {"values": [512, 1024, 4096, 10_000]},
-            "training_episodes": {"values": [25_000]},
-            "lr": {"max": 1e-2, "min": 1e-5, "distribution": "log_uniform_values"},
-            "hidden_layers": {"values": [
-                (32,),
-                (64,),
-                (128,),
-                (32, 32),
-                (128, 128),
-            ]},
-            "start_e": {"values": [1.0]},
-            "end_e": {"min": 0.01, "max": 0.2},
-            "decay_duration": {"min": 0.5, "max": 0.95},
-            "tau": {"min": 0.0005, "max": 0.1, "distribution": "log_uniform_values"}
-        },
-    }
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(help="Subcommand Help")
 
-    sweep_id = wandb.sweep(sweep=mlp_sweep_configuration, entity="kan_rl", project="Buffer-test")
-    wandb.agent(sweep_id=sweep_id, function=main, count=1)
+    ## Single run parser
+    run_parser = subparsers.add_parser("run", help="Run Help")
+    run_parser.add_argument("--env_name", default="CartPole-v1", type=str, help="The RL Environment")
+    run_parser.add_argument("--key", default=0, type=int, help="The JAX PRNG key")
+    run_parser.add_argument("--batch_size", default=512, type=int, help="The replay batch size")
+    run_parser.add_argument("--buffer-length", default=10_000, type=int, help="The Buffer Replay Length")
+    run_parser.add_argument("--training-episodes", default=10_000, type=int, help="The # of episodes to train")
+    run_parser.add_argument("--lr", default=1e-3, type=float, help="The Learning Rate")
+    run_parser.add_argument("--hidden_layers", default=(32,), type=tuple[int])
+    run_parser.add_argument("--start_e", default=1.0, type=float, )
+    run_parser.add_argument("--end_e", default=0.01, type=float, )
+    run_parser.add_argument("--decay_duration", default=0.5, type=float)
+    run_parser.add_argument("--tau", default=5e-4, help="The mixing parameter for updating the target network. ")
+    run_parser.add_argument("--wandb", action="store_true")
+    run_parser.set_defaults(func=main) # Directly call 'main' 
+
+    # sweep parser
+    run_parser = subparsers.add_parser("sweep", help="Run Help")
+    run_parser.add_argument("--env_name", default="CartPole-v1", type=str, help="The RL Environment", nargs="+")
+    run_parser.add_argument("--batch-size", default=(16, 32, 64, 128, 512), type=tuple[int], help="The replay batch size", nargs="+")
+    run_parser.add_argument("--buffer-length", default=(512, 1024, 4096, 10_000), type=tuple[int], help="The Buffer Replay Length", nargs="+")
+    run_parser.add_argument("--training-episodes", default=(25_000,), type=tuple[int], help="The # of episodes to train", nargs="+")
+    run_parser.add_argument("--lr-min", default=1e-5, type=float, help="The Learning Rate Minimum")
+    run_parser.add_argument("--lr-max", default=1e-2, type=float, help="The Learning Rate Maximum")
+    run_parser.add_argument("--hidden_layers", default=((32,),(64,),(128,),(32, 32),(128, 128)), type=tuple[int], nargs="+")
+    run_parser.add_argument("--start_e", default=1.0, type=float)
+    run_parser.add_argument("--end_e-min", default=0.01, type=float)
+    run_parser.add_argument("--end_e-max", default=0.2, type=float)
+    run_parser.add_argument("--decay_duration-min", default=0.5, type=float)
+    run_parser.add_argument("--decay_duration-max", default=0.95, type=float)
+    run_parser.add_argument("--tau-min", default=5e-4, help="The minimum mixing parameter for updating the target network. ")
+    run_parser.add_argument("--tau-max", default=0.1, help="The maximum mixing parameter for updating the target network. ")
+    run_parser.set_defaults(func=setup_sweep) # Directly call 'main' 
+
+    args = parser.parse_args()
+    args.func(args)
+    # mlp_sweep_configuration = {
+    #     "method": "random",
+    #     "name": "sweep",
+    #     "metric": {"goal": "maximize", "name": "length mean"},
+    #     "parameters": {
+    #         "env_name": {"values": ["CartPole-v1"]},
+    #         "key": {"min": 0, "max": 10**6, "distribution": "int_uniform"},
+    #         "batch_size": {"values": [16, 32, 64, 128, 512]},
+    #         "buffer_length": {"values": [512, 1024, 4096, 10_000]},
+    #         "training_episodes": {"values": [25_000]},
+    #         "lr": {"max": 1e-2, "min": 1e-5, "distribution": "log_uniform_values"},
+    #         "hidden_layers": {"values": [
+    #             (32,),
+    #             (64,),
+    #             (128,),
+    #             (32, 32),
+    #             (128, 128),
+    #         ]},
+    #         "start_e": {"values": [1.0]},
+    #         "end_e": {"min": 0.01, "max": 0.2},
+    #         "decay_duration": {"min": 0.5, "max": 0.95},
+    #         "tau": {"min": 0.0005, "max": 0.1, "distribution": "log_uniform_values"}
+    #     },
+    # }
+
+    # sweep_id = wandb.sweep(sweep=mlp_sweep_configuration, entity="kan_rl", project="Buffer-test")
+    # wandb.agent(sweep_id=sweep_id, function=main, count=1)
