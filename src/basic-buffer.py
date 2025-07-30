@@ -1,7 +1,7 @@
 from kan import KAN
 from mlp import MLP
 from tabular import Table
-from jax import random as jr, numpy as jnp, lax, value_and_grad, debug
+from jax import random as jr, numpy as jnp, lax, value_and_grad, debug, vmap
 import equinox as eqx
 from tqdm import tqdm
 import optax
@@ -12,6 +12,7 @@ import flashbax as fbx
 from typing import Any
 import chex
 import wandb
+from functools import partial
 
 
 class LoopState(eqx.Module):
@@ -64,6 +65,37 @@ def main(conf=None):
 
     # Create buffer
     buffer = fbx.make_item_buffer(max_length=conf.buffer_length, min_length=batch_size, sample_batch_size=batch_size)
+
+    @partial(vmap, in_axes=(None, 0))
+    def evaluate(network, key):
+        key, _key = jr.split(key)
+        obs, state = env.reset(_key, env_params)
+        cum_reward = 0.0
+        carry = (obs, state, key, cum_reward, 0.0, False)
+
+        def body(carry):
+            obs, state, key, cum_reward, length, _ = carry
+            key, action_key, step_key = jr.split(key, 3)
+            action, _, _ = q_epsilon_greedy(network, obs, 0.0, action_key)
+            next_obs, next_state, reward, done, _ = env.step(step_key, state, action, env_params)
+
+            return (
+                next_obs,
+                next_state,
+                key,
+                cum_reward + gamma**length * reward,
+                length + 1,
+                done
+            )
+        
+        (obs, state, key, cum_reward, length, done) = lax.while_loop(
+            lambda c: jnp.logical_not(c[5]),
+            body,
+            carry
+        )
+
+        return cum_reward, length
+
 
     def warmup_buffer(loop_state: LoopState) -> LoopState:
         key, _key = jr.split(loop_state.key)
@@ -125,10 +157,6 @@ def main(conf=None):
             target_model=loop_state.target_network
         )
 
-        # print((grads.q_values != 0).sum())
-        # print(loss)
-        # exit()
-
         # Update network
         updates, opt_state = optimizer.update(grads, loop_state.opt_state, loop_state.network)
         network = eqx.apply_updates(loop_state.network, updates)
@@ -154,7 +182,11 @@ def main(conf=None):
             loop_state
         )
 
-        return loop_state, loop_state.global_step
+        eval_keys = jr.split(loop_state.key, 50)
+
+        evaluations = evaluate(loop_state.network, eval_keys)
+
+        return loop_state, evaluations
 
     key, _key = jr.split(key)
     obs, state = env.reset(key, env_params)
@@ -187,25 +219,24 @@ def main(conf=None):
 
     # Train for 'training_episodes' episodes
     # train_step(loop_state)
-    loop_state, ls = lax.scan(
+    loop_state, evaluations = lax.scan(
         lambda ls, _: eval_step(ls),
         loop_state,
         length=training_episodes,
     )
 
-    episode_lengths = ls[1:] - ls[:-1]
+    rewards, lengths = evaluations
 
-    window_size = 20
-    for i, length in enumerate(episode_lengths):
-        if i >= window_size:
-            window = episode_lengths[i-window_size:i]
-        else:
-            window = jnp.zeros(1)
+    for i in range(rewards.shape[0]):
+
+        ep_rewards = rewards[i, :]
+        ep_lengths = lengths[i, :]
     
         wandb.log({
-            "length": length,
-            "length mean":  window.mean(),
-            "length var": window.var(),
+            "reward-mean": ep_rewards.mean(),
+            "reward-var": ep_rewards.var(),
+            "length-mean":  ep_lengths.mean(),
+            "length-var": ep_lengths.var(),
         })
 
     wandb.finish()
@@ -214,32 +245,6 @@ def main(conf=None):
 
 
 if __name__ == "__main__":
-
-    # training_episodes = 10_000
-    # gamma = 0.99
-
-    # # Create eps-decay settings
-    # start_e = 1.0
-    # end_e = 0.01
-    # decay_duration = 5_000
-    # tau = 0.005
-
-    # # Initialize network
-    # key, _key = jr.split(key)
-    # dims = [obs_space[0], 128, num_actions]
-    # # network = KAN(dims, 7, 3, 3, _key)
-    # network = MLP(dims, _key)
-    # target_network = network
-    # # a = jnp.asarray([-2.4, -2.4, -0.21, -1.0])
-    # # network = Table(a, -a, 10, env.action_space(env_params).n, env_params.max_steps_in_episode)
-
-    # # optimizer
-    # batch_size = 128
-    # optimizer = optax.adamw(1e-4)
-    # opt_state = optimizer.init(network)
-
-    # # Create buffer
-    # buffer = fbx.make_item_buffer(max_length=10_000, min_length=batch_size, sample_batch_size=batch_size)
 
     mlp_sweep_configuration = {
         "method": "random",
@@ -250,7 +255,7 @@ if __name__ == "__main__":
             "key": {"min": 0, "max": 10**6, "distribution": "int_uniform"},
             "batch_size": {"values": [16, 32, 64, 128, 512]},
             "buffer_length": {"values": [512, 1024, 4096, 10_000]},
-            "training_episodes": {"values": [5_000, 10_000, 50_000, 100_000]},
+            "training_episodes": {"values": [25_000]},
             "lr": {"max": 1e-2, "min": 1e-5, "distribution": "log_uniform_values"},
             "hidden_layers": {"values": [
                 (32,),
@@ -267,4 +272,4 @@ if __name__ == "__main__":
     }
 
     sweep_id = wandb.sweep(sweep=mlp_sweep_configuration, entity="kan_rl", project="Buffer-test")
-    wandb.agent(sweep_id=sweep_id, function=main, count=500)
+    wandb.agent(sweep_id=sweep_id, function=main, count=1)
