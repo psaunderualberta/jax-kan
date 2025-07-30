@@ -30,7 +30,7 @@ class KAN(eqx.Module):
             in_dim = out_dim
 
     def __call__(self, x):
-        for layer in self.layers[:1]:
+        for layer in self.layers[:-1]:
             # Linear layer
             x = layer(x)
 
@@ -44,4 +44,4 @@ class KAN(eqx.Module):
         return self.layers[-1](x)
 
     def num_actions(self):
-        return self.layers[-1].w_b.shape[0]
+        return self.layers[-1].w_b.shape[1]
