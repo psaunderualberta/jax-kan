@@ -19,11 +19,59 @@ from kan.kan import KAN
 from gymnax import make
 import chex
 from gymnax.environments import environment
+from collections import deque
+
+
+from collections import deque
+
+
+class ActionHistoryBuffer:
+    """Buffer to store the last N state-action pairs for context."""
+    def __init__(self, max_history=4, obs_dim=4, num_actions=2):
+        self.max_history = max_history
+        self.obs_dim = obs_dim
+        self.num_actions = num_actions
+        self.history = deque(maxlen=max_history)
+        self.reset()
+    
+    def reset(self):
+        """Reset the history buffer."""
+        self.history.clear()
+        for _ in range(self.max_history):
+            self.history.append({
+                'state': jnp.zeros(self.obs_dim),
+                'action': 0,
+                'action_onehot': jnp.zeros(self.num_actions)
+            })
+    
+    def add(self, state, action):
+        """Add a new state-action pair to the history."""
+        action_onehot = jnp.zeros(self.num_actions)
+        action_onehot = action_onehot.at[action].set(1.0)
+        
+        self.history.append({
+            'state': state,
+            'action': action,
+            'action_onehot': action_onehot
+        })
+    
+    def get_extended_state(self, current_state):
+        """Get the extended state representation including action history."""
+        extended_state = [current_state]
+        for entry in self.history:
+            extended_state.append(entry['state'])
+            extended_state.append(entry['action_onehot'])
+        
+        return jnp.concatenate(extended_state)
+    
+    def get_extended_dim(self):
+        """Get the dimension of the extended state representation."""
+        return self.obs_dim + self.max_history * (self.obs_dim + self.num_actions)
 
 
 class StreamingAgent:
     """Base class for streaming reinforcement learning agents."""
-    def __init__(self, env_name="CartPole-v1"):
+    def __init__(self, env_name="CartPole-v1", use_action_history=True, history_length=4):
         self.env, self.env_params = make(env_name)
         self.env_name = env_name
         self.name = "BaseAgent"
@@ -31,6 +79,40 @@ class StreamingAgent:
         self.total_steps = 0
         self.total_rewards = []
         self.avg_td_errors = []
+        
+        self.use_action_history = use_action_history
+        self.history_length = history_length
+        
+        if self.use_action_history:
+            obs_space = self.env.observation_space(self.env_params)
+            obs_dim = len(obs_space.shape)
+            if obs_dim == 0:
+                obs_dim = 1
+            else:
+                obs_dim = obs_space.shape[0]
+            
+            self.action_history = ActionHistoryBuffer(
+                max_history=history_length,
+                obs_dim=obs_dim,
+                num_actions=self.env.num_actions
+            )
+    
+    def reset_episode(self):
+        """Reset episode-specific state including action history."""
+        if self.use_action_history:
+            self.action_history.reset()
+    
+    def get_state_representation(self, state):
+        """Get state representation (with or without action history)."""
+        if self.use_action_history:
+            return self.action_history.get_extended_state(state)
+        else:
+            return state
+    
+    def update_action_history(self, state, action):
+        """Update the action history buffer."""
+        if self.use_action_history:
+            self.action_history.add(state, action)
     
     def select_action(self, state):
         """Select an action given the current state."""
@@ -45,19 +127,26 @@ class StreamingAgent:
         self.key, key_reset = jr.split(self.key)
         obs, state = self.env.reset(key_reset, self.env_params)
         
+        self.reset_episode()
+        
         episode_rewards = []
         episode_td_errors = []
         
         for step in range(max_steps):
-            action = self.select_action(obs)
+            state_repr = self.get_state_representation(obs)
+            action = self.select_action(state_repr)
             
             self.key, key_step = jr.split(self.key)
             next_obs, next_state, reward, done, info = self.env.step(
                 key_step, state, action, self.env_params
             )
 
+            self.update_action_history(obs, action)
+            
+            next_state_repr = self.get_state_representation(next_obs)
+            
             self.key, key_step = jr.split(self.key)
-            td_error = self.update(obs, action, reward, next_obs, done)
+            td_error = self.update(state_repr, action, reward, next_state_repr, done)
             
             episode_rewards.append(reward)
             episode_td_errors.append(float(td_error))
@@ -126,9 +215,11 @@ class NetworkStreamQAgent(StreamingAgent):
         start_e=1.0,
         end_e=0.01,
         decay_duration=500,
+        use_action_history=True,
+        history_length=4,
         seed=0
     ):
-        super().__init__(env_name)
+        super().__init__(env_name, use_action_history, history_length)
         self.name = "NetworkQAgent"
         self.alpha = learning_rate
         self.gamma = discount_factor
@@ -140,6 +231,10 @@ class NetworkStreamQAgent(StreamingAgent):
         
         obs_space = self.env.observation_space(self.env_params)
         self.obs_dim = len(obs_space.shape)
+        if self.obs_dim == 0:
+            self.obs_dim = 1
+        else:
+            self.obs_dim = obs_space.shape[0]
         self.num_actions = self.env.num_actions
         
         self.network = network
@@ -204,6 +299,8 @@ class MLPBasicStreaming(NetworkStreamQAgent):
         start_e=1.0,
         end_e=0.01,
         decay_duration=500,
+        use_action_history=True,
+        history_length=4,
         seed=0
     ):
         env, env_params = make(env_name)
@@ -216,9 +313,14 @@ class MLPBasicStreaming(NetworkStreamQAgent):
         
         num_actions = env.num_actions
         
+        if use_action_history:
+            input_dim = obs_dim + history_length * (obs_dim + num_actions)
+        else:
+            input_dim = obs_dim
+        
         key = jr.PRNGKey(seed)
         key, subkey = jr.split(key)
-        network_dims = [obs_dim] + hidden_dims + [num_actions]
+        network_dims = [input_dim] + hidden_dims + [num_actions]
         network = MLP(network_dims, subkey)
         
         super().__init__(
@@ -229,6 +331,8 @@ class MLPBasicStreaming(NetworkStreamQAgent):
             start_e,
             end_e,
             decay_duration,
+            use_action_history,
+            history_length,
             seed
         )
         
@@ -251,6 +355,8 @@ class KANBasicStreaming(NetworkStreamQAgent):
         grid=7,
         k=3, 
         num_stds=3,
+        use_action_history=True,
+        history_length=4,
         seed=0
     ):
         env, env_params = make(env_name)
@@ -263,9 +369,15 @@ class KANBasicStreaming(NetworkStreamQAgent):
         
         num_actions = env.num_actions
         
+        if use_action_history:
+            # current state + history_length * (state + action_onehot)
+            input_dim = obs_dim + history_length * (obs_dim + num_actions)
+        else:
+            input_dim = obs_dim
+        
         key = jr.PRNGKey(seed)
         key, subkey = jr.split(key)
-        network_dims = [obs_dim] + hidden_dims + [num_actions]
+        network_dims = [input_dim] + hidden_dims + [num_actions]
         network = KAN(network_dims, grid, k, num_stds, subkey)
         
         super().__init__(
@@ -276,6 +388,8 @@ class KANBasicStreaming(NetworkStreamQAgent):
             start_e,
             end_e,
             decay_duration,
+            use_action_history,
+            history_length,
             seed
         )
         
@@ -296,6 +410,9 @@ class StreamQTrainState(eqx.Module):
     obs_stats: SampleMeanStats
     reward_stats: SampleMeanStats
     length: int
+    history_states: jnp.ndarray   # (history_length, obs_dim)
+    history_actions: jnp.ndarray  # (history_length,)
+    history_onehot: jnp.ndarray   # (history_length, num_actions)
 
     def replace(self, **kwargs) -> 'StreamQTrainState':
         """Replace attributes in the training state with new values."""
@@ -325,9 +442,11 @@ class BaseStreamQ(StreamingAgent):
         start_e=1.0,
         end_e=0.01,
         stop_exploring_timestep=500,
+        use_action_history=True,
+        history_length=4,
         seed=0
     ):
-        super().__init__(env_name)
+        super().__init__(env_name, use_action_history, history_length)
         self.name = "StreamQAgent"
         self.alpha = learning_rate
         self.gamma = discount_factor
@@ -351,6 +470,33 @@ class BaseStreamQ(StreamingAgent):
         
         self._init_train_state()
     
+    def get_extended_state_jax(self, current_state, history_states, history_actions, history_onehot):
+        """JAX-compatible version of getting extended state representation."""
+        if self.use_action_history:
+            flat_history_states = history_states.reshape(-1)  # (history_length * obs_dim,)
+            flat_history_onehot = history_onehot.reshape(-1)  # (history_length * num_actions,)
+            
+            return jnp.concatenate([current_state, flat_history_states, flat_history_onehot])
+        else:
+            return current_state
+    
+    def update_history_jax(self, history_states, history_actions, history_onehot, new_state, new_action):
+        """JAX-compatible version of updating action history."""
+        # shift existing history by one position (remove oldest, add newest)
+        new_history_states = jnp.roll(history_states, -1, axis=0)
+        new_history_states = new_history_states.at[-1].set(new_state)
+        
+        new_history_actions = jnp.roll(history_actions, -1)
+        new_history_actions = new_history_actions.at[-1].set(new_action)
+        
+        new_action_onehot = jnp.zeros(self.num_actions)
+        new_action_onehot = new_action_onehot.at[new_action].set(1.0)
+        
+        new_history_onehot = jnp.roll(history_onehot, -1, axis=0)
+        new_history_onehot = new_history_onehot.at[-1].set(new_action_onehot)
+        
+        return new_history_states, new_history_actions, new_history_onehot
+    
     def _init_train_state(self):
         """Initialize the training state for StreamQ."""
         self.key, key_reset, key_ts = jr.split(self.key, 3)
@@ -359,6 +505,10 @@ class BaseStreamQ(StreamingAgent):
         obs_stats = SampleMeanStats.new_params(obs.shape)
         obs, obs_stats = normalize_observation(obs, obs_stats)
         reward_stats = SampleMeanStats.new_params(())
+        
+        history_states = jnp.zeros((self.history_length, self.obs_dim))
+        history_actions = jnp.zeros(self.history_length, dtype=jnp.int32)
+        history_onehot = jnp.zeros((self.history_length, self.num_actions))
         
         self.train_state = StreamQTrainState(
             key=key_ts,
@@ -373,11 +523,24 @@ class BaseStreamQ(StreamingAgent):
             length=0,
             obs_stats=obs_stats,
             reward_stats=reward_stats,
+            history_states=history_states,
+            history_actions=history_actions,
+            history_onehot=history_onehot,
         )
     
     def select_action(self, state):
         """Epsilon-greedy action selection using StreamQ epsilon schedule."""
         self.key, subkey = jr.split(self.key)
+        
+        if self.use_action_history:
+            extended_state = self.get_extended_state_jax(
+                state, 
+                self.train_state.history_states,
+                self.train_state.history_actions,
+                self.train_state.history_onehot
+            )
+        else:
+            extended_state = state
         
         eps = linear_epsilon_schedule(
             self.start_e, 
@@ -387,7 +550,7 @@ class BaseStreamQ(StreamingAgent):
         )
         action, _, _ = q_epsilon_greedy(
             self.train_state.q_network, 
-            state, 
+            extended_state, 
             eps,
             subkey
         )
@@ -396,21 +559,40 @@ class BaseStreamQ(StreamingAgent):
     
     def update(self, state, action_idx, reward, next_state, done):
         """Update using StreamQ(Lambda) algorithm."""
+        # Note: state and next_state are already extended representations from run_episode
+        
         # normalize observations and reward
-        next_state, new_obs_stats = normalize_observation(next_state, self.train_state.obs_stats)
+        # for normalization, we use only the raw observation part, not the extended state
+        if self.use_action_history:
+            # extract raw observation from extended state (first obs_dim elements)
+            raw_next_obs = next_state[:self.obs_dim]
+        else:
+            raw_next_obs = next_state
+            
+        raw_next_obs, new_obs_stats = normalize_observation(raw_next_obs, self.train_state.obs_stats)
+        
+        # update the extended state representation with normalized observation
+        if self.use_action_history:
+            next_state_normalized = jnp.concatenate([
+                raw_next_obs,
+                next_state[self.obs_dim:]
+            ])
+        else:
+            next_state_normalized = raw_next_obs
+        
         scaled_reward, new_reward_trace, new_reward_stats = scale_reward(
             reward, self.train_state.reward_stats, self.train_state.reward_trace, done, self.gamma
         )
         
-        # compute TD error and gradients
+        # compute TD error and gradients using extended states
         td_error, td_grad = value_and_grad(get_delta)(
             self.train_state.q_network, 
             scaled_reward, 
             self.gamma, 
             done, 
-            state, 
+            state,
             action_idx, 
-            next_state
+            next_state_normalized
         )
         
         # update eligibility trace
@@ -440,7 +622,7 @@ class BaseStreamQ(StreamingAgent):
         )
         _, _, explored = q_epsilon_greedy(
             self.train_state.q_network, 
-            state, 
+            state,  # use current extended state for exploration check
             eps, 
             action_key
         )
@@ -456,9 +638,23 @@ class BaseStreamQ(StreamingAgent):
             new_z_w
         )
         
+        if self.use_action_history:
+            raw_current_obs = state[:self.obs_dim]
+            new_history_states, new_history_actions, new_history_onehot = self.update_history_jax(
+                self.train_state.history_states,
+                self.train_state.history_actions, 
+                self.train_state.history_onehot,
+                raw_current_obs,
+                action_idx
+            )
+        else:
+            new_history_states = self.train_state.history_states
+            new_history_actions = self.train_state.history_actions
+            new_history_onehot = self.train_state.history_onehot
+        
         # update training state
         self.train_state = self.train_state.replace(
-            obs=next_state,
+            obs=raw_next_obs,
             z_w=new_z_w,
             q_network=new_q_network,
             reward_=self.train_state.reward_ * self.gamma + reward,
@@ -467,20 +663,95 @@ class BaseStreamQ(StreamingAgent):
             length=self.train_state.length + 1,
             obs_stats=new_obs_stats,
             reward_stats=new_reward_stats,
+            history_states=new_history_states,
+            history_actions=new_history_actions,
+            history_onehot=new_history_onehot,
         )
         
-        # reset reward accumulation if episode ended
+        # reset reward accumulation and history if episode ended
         if done:
+            reset_history_states = jnp.zeros((self.history_length, self.obs_dim))
+            reset_history_actions = jnp.zeros(self.history_length, dtype=jnp.int32)
+            reset_history_onehot = jnp.zeros((self.history_length, self.num_actions))
+            
             self.train_state = self.train_state.replace(
                 reward_trace=0.0,
                 reward_=0.0,
-                length=0
+                length=0,
+                history_states=reset_history_states,
+                history_actions=reset_history_actions,
+                history_onehot=reset_history_onehot,
             )
         
         # update network reference
         self.network = new_q_network
         
         return float(td_error)
+    
+    def run_episode(self, max_steps=1000, render=False):
+        """Run a single episode with StreamQ-specific state management."""
+        self.key, key_reset = jr.split(self.key)
+        obs, state = self.env.reset(key_reset, self.env_params)
+        
+        self._init_train_state()
+        
+        episode_rewards = []
+        episode_td_errors = []
+        
+        for step in range(max_steps):
+            action = self.select_action(self.train_state.obs)
+            
+            self.key, key_step = jr.split(self.key)
+            next_obs, next_state, reward, done, info = self.env.step(
+                key_step, state, action, self.env_params
+            )
+
+            if self.use_action_history:
+                current_extended_state = self.get_extended_state_jax(
+                    self.train_state.obs, 
+                    self.train_state.history_states,
+                    self.train_state.history_actions,
+                    self.train_state.history_onehot
+                )
+                temp_history_states, temp_history_actions, temp_history_onehot = self.update_history_jax(
+                    self.train_state.history_states,
+                    self.train_state.history_actions, 
+                    self.train_state.history_onehot,
+                    self.train_state.obs,
+                    action
+                )
+                next_extended_state = self.get_extended_state_jax(
+                    next_obs,
+                    temp_history_states,
+                    temp_history_actions,
+                    temp_history_onehot
+                )
+            else:
+                current_extended_state = self.train_state.obs
+                next_extended_state = next_obs
+            
+            self.key, key_step = jr.split(self.key)
+            td_error = self.update(current_extended_state, action, reward, next_extended_state, done)
+            
+            episode_rewards.append(reward)
+            episode_td_errors.append(float(td_error))
+            
+            obs, state = next_obs, next_state
+            
+            if done:
+                break
+        
+        self.episode_count += 1
+        self.total_steps += step + 1
+        self.total_rewards.append(sum(episode_rewards))
+        self.avg_td_errors.append(sum(episode_td_errors) / (step + 1))
+        
+        return {
+            'rewards': episode_rewards,
+            'total_reward': sum(episode_rewards),
+            'steps': step + 1,
+            'avg_td_error': sum(episode_td_errors) / (step + 1)
+        }
 
 
 class MLPStreamQLambda(BaseStreamQ):
@@ -498,6 +769,8 @@ class MLPStreamQLambda(BaseStreamQ):
         start_e=1.0,
         end_e=0.01,
         stop_exploring_timestep=500,
+        use_action_history=True,
+        history_length=4,
         seed=0
     ):
         env, env_params = make(env_name)
@@ -510,9 +783,15 @@ class MLPStreamQLambda(BaseStreamQ):
         
         num_actions = env.num_actions
         
+        if use_action_history:
+            # current state + history_length * (state + action_onehot)
+            input_dim = obs_dim + history_length * (obs_dim + num_actions)
+        else:
+            input_dim = obs_dim
+        
         key = jr.PRNGKey(seed)
         key, subkey = jr.split(key)
-        network_dims = [obs_dim] + hidden_dims + [num_actions]
+        network_dims = [input_dim] + hidden_dims + [num_actions]
         network = MLP(network_dims, subkey)
         
         super().__init__(
@@ -525,6 +804,8 @@ class MLPStreamQLambda(BaseStreamQ):
             start_e,
             end_e,
             stop_exploring_timestep,
+            use_action_history,
+            history_length,
             seed
         )
         
@@ -549,6 +830,8 @@ class KANStreamQLambda(BaseStreamQ):
         grid=7,
         k=3, 
         num_stds=3,
+        use_action_history=True,
+        history_length=4,
         seed=0
     ):
         env, env_params = make(env_name)
@@ -561,9 +844,15 @@ class KANStreamQLambda(BaseStreamQ):
         
         num_actions = env.num_actions
         
+        if use_action_history:
+            # current state + history_length * (state + action_onehot)
+            input_dim = obs_dim + history_length * (obs_dim + num_actions)
+        else:
+            input_dim = obs_dim
+        
         key = jr.PRNGKey(seed)
         key, subkey = jr.split(key)
-        network_dims = [obs_dim] + hidden_dims + [num_actions]
+        network_dims = [input_dim] + hidden_dims + [num_actions]
         network = KAN(network_dims, grid, k, num_stds, subkey)
         
         super().__init__(
@@ -576,6 +865,8 @@ class KANStreamQLambda(BaseStreamQ):
             start_e,
             end_e,
             stop_exploring_timestep,
+            use_action_history,
+            history_length,
             seed
         )
         

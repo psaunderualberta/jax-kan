@@ -184,11 +184,21 @@ def train_and_evaluate_agent(agent, num_episodes, max_steps, log_frequency=1, al
     wandb.log(summary_metrics)
     wandb.log({"episodes_data": episodes_table})
     
-    wandb.log({
-        "reward_histogram": wandb.Histogram(total_rewards),
-        "length_histogram": wandb.Histogram(episode_lengths),
-        "td_error_histogram": wandb.Histogram(td_errors)
-    })
+    # Filter out NaN values before creating histograms
+    valid_rewards = [r for r in total_rewards if not np.isnan(r)]
+    valid_lengths = [l for l in episode_lengths if not np.isnan(l)]
+    valid_td_errors = [td for td in td_errors if not np.isnan(td) and np.isfinite(td)]
+    
+    histograms = {}
+    if valid_rewards:
+        histograms["reward_histogram"] = wandb.Histogram(valid_rewards)
+    if valid_lengths:
+        histograms["length_histogram"] = wandb.Histogram(valid_lengths)
+    if valid_td_errors:
+        histograms["td_error_histogram"] = wandb.Histogram(valid_td_errors)
+    
+    if histograms:
+        wandb.log(histograms)
     
     return final_avg_reward, results
 

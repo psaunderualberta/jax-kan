@@ -29,6 +29,8 @@ def test_basic_streaming_agents(env_name, num_episodes=100, max_steps=500, netwo
             start_e=1.0,
             end_e=0.01,
             decay_duration=500,
+            use_action_history=True,
+            history_length=4,
             seed=0
         )
         mlp_results = mlp_agent.run(num_episodes=num_episodes, max_steps_per_episode=max_steps)
@@ -47,6 +49,8 @@ def test_basic_streaming_agents(env_name, num_episodes=100, max_steps=500, netwo
             grid=7,
             k=3,
             num_stds=3,
+            use_action_history=True,
+            history_length=4,
             seed=0
         )
         kan_results = kan_agent.run(num_episodes=num_episodes, max_steps_per_episode=max_steps)
@@ -77,6 +81,8 @@ def test_streamq_lambda_agents(env_name, num_episodes=100, max_steps=500, networ
             start_e=1.0,
             end_e=0.01,
             stop_exploring_timestep=int(num_episodes * max_steps * 0.5),
+            use_action_history=True,
+            history_length=4,
             seed=0
         )
         mlp_streamq_results = mlp_streamq_agent.run(num_episodes=num_episodes, max_steps_per_episode=max_steps)
@@ -98,6 +104,8 @@ def test_streamq_lambda_agents(env_name, num_episodes=100, max_steps=500, networ
             grid=7,
             k=3,
             num_stds=3,
+            use_action_history=True,
+            history_length=4,
             seed=0
         )
         kan_streamq_results = kan_streamq_agent.run(num_episodes=num_episodes, max_steps_per_episode=max_steps)
