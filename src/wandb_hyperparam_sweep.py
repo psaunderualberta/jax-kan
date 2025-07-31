@@ -3,6 +3,7 @@ Weights & Biases hyperparameter sweeps for StreamQ algorithms.
 """
 
 import argparse
+import sys
 import jax
 import wandb
 import numpy as np
@@ -33,7 +34,8 @@ BASIC_STREAMING_SWEEP_CONFIG = {
         ]},
         'kan_grid': {'distribution': 'int_uniform','min': 3,'max': 12},
         'kan_k': {'distribution': 'int_uniform', 'min': 2,'max': 6},
-        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6}
+        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6},
+        'seed': {'values': [0, 42, 123, 456, 789]}
     }
 }
 
@@ -57,7 +59,8 @@ STREAMQ_LAMBDA_SWEEP_CONFIG = {
         ]},
         'kan_grid': {'distribution': 'int_uniform','min': 3,'max': 12},
         'kan_k': {'distribution': 'int_uniform', 'min': 2,'max': 6},
-        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6}
+        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6},
+        'seed': {'values': [0, 42, 123, 456, 789]}
     }
 }
 
@@ -339,9 +342,9 @@ def create_sweep(algorithm, network, env_name="CartPole-v1", project_name="strea
         raise ValueError(f"Unknown algorithm: {algorithm}")
     
     # Add program specification for wandb agent
-    # Use the full command specification to ensure correct python interpreter
+    # Use sys.executable to ensure we use the same Python interpreter
     sweep_config['command'] = [
-        '/home/ammany01/.pyenv/versions/env-3.11.13/bin/python',
+        sys.executable,
         'src/wandb_hyperparam_sweep.py',
         '${args}'
     ]
@@ -351,8 +354,7 @@ def create_sweep(algorithm, network, env_name="CartPole-v1", project_name="strea
         'network': {'value': network},
         'env_name': {'value': env_name},
         'num_episodes': {'value': 200},
-        'max_steps': {'value': 500},
-        'seed': {'value': 0}
+        'max_steps': {'value': 500}
     })
     
     sweep_id = wandb.sweep(
@@ -388,7 +390,7 @@ def run_single_experiment(algorithm, network, config_override=None):
             'kan_grid': 7,
             'kan_k': 3,
             'kan_num_stds': 3,
-            'seed': 0
+            'seed': 42  # Use a different seed for single tests
         }
     else:
         default_config = {
@@ -410,7 +412,7 @@ def run_single_experiment(algorithm, network, config_override=None):
             'kan_grid': 7,
             'kan_k': 3,
             'kan_num_stds': 3,
-            'seed': 0
+            'seed': 42  # Use a different seed for single tests
         }
     
     if config_override:

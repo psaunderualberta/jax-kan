@@ -5,8 +5,33 @@ set -e
 PROJECT_NAME="streamq-hyperopt"
 COUNT=50
 ENV="CartPole-v1"
-PYTHON_CMD="/home/ammany01/.pyenv/versions/env-3.11.13/bin/python"
-WANDB_CMD="/home/ammany01/.pyenv/versions/env-3.11.13/bin/wandb"
+
+# Activate the pyenv environment
+if command -v pyenv &> /dev/null; then
+    export PYENV_VERSION="env-3.11.13"
+    echo "Activated pyenv environment: $PYENV_VERSION"
+else
+    echo "Warning: pyenv not found, using system Python"
+fi
+
+# Use python3 if available, fallback to python
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+else
+    echo "Error: Neither 'python' nor 'python3' found in PATH"
+    echo "Please activate your environment or install Python"
+    exit 1
+fi
+
+# Check for wandb
+if command -v wandb &> /dev/null; then
+    WANDB_CMD="wandb"
+else
+    echo "Error: 'wandb' not found in PATH. Install with: pip install wandb"
+    exit 1
+fi
 
 show_help() {
     cat << EOF

@@ -20,7 +20,8 @@ BASIC_STREAMING_SWEEP = {
         ]},
         'kan_grid': {'values': [5, 7, 9, 11]},
         'kan_k': {'values': [2, 3, 4]},
-        'kan_num_stds': {'values': [2, 3, 4, 5]}
+        'kan_num_stds': {'values': [2, 3, 4, 5]},
+        'seed': {'values': [0, 42, 123, 456, 789]}
     }
 }
 
@@ -41,7 +42,8 @@ BASIC_QUICK_SWEEP = {
         ]},
         'kan_grid': {'values': [5, 7, 9]},
         'kan_k': {'values': [2, 3, 4]},
-        'kan_num_stds': {'values': [2, 3, 4]}
+        'kan_num_stds': {'values': [2, 3, 4]},
+        'seed': {'values': [0, 42, 123]}
     }
 }
 
@@ -63,7 +65,8 @@ BASIC_COMPREHENSIVE_SWEEP = {
         ]},
         'kan_grid': {'distribution': 'int_uniform','min': 3,'max': 12},
         'kan_k': {'distribution': 'int_uniform', 'min': 2,'max': 6},
-        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6}
+        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6},
+        'seed': {'values': [0, 42, 123, 456, 789]}
     }
 }
 
@@ -91,7 +94,8 @@ STREAMQ_QUICK_SWEEP = {
         ]},
         'kan_grid': {'values': [5, 7, 9]},
         'kan_k': {'values': [2, 3, 4]},
-        'kan_num_stds': {'values': [2, 3, 4]}
+        'kan_num_stds': {'values': [2, 3, 4]},
+        'seed': {'values': [0, 42, 123]}
     }
 }
 
@@ -122,7 +126,8 @@ STREAMQ_COMPREHENSIVE_SWEEP = {
         ]},
         'kan_grid': {'distribution': 'int_uniform','min': 3,'max': 12},
         'kan_k': {'distribution': 'int_uniform', 'min': 2,'max': 6},
-        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6}
+        'kan_num_stds': {'distribution': 'int_uniform','min': 1,'max': 6},
+        'seed': {'values': [0, 42, 123, 456, 789]}
     }
 }
 
