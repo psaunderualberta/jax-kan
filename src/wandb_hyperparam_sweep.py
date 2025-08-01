@@ -369,7 +369,7 @@ def create_sweep(algorithm, network, env_name="CartPole-v1", project_name="strea
     return sweep_id
 
 
-def run_single_experiment(algorithm, network, config_override=None):
+def run_single_experiment(algorithm, network, config_override=None, project_name="streamq-hyperopt", run_name=None):
     """Run a single experiment with specified configuration."""
     
     if algorithm == 'basic':
@@ -377,10 +377,8 @@ def run_single_experiment(algorithm, network, config_override=None):
             'algorithm': algorithm,
             'network': network,
             'env_name': 'CartPole-v1',
-            # 'num_episodes': 200,
-            'num_episodes': 10,
-            # 'max_steps': 500,
-            'max_steps': 100,
+            'num_episodes': 200,
+            'max_steps': 500,
             'learning_rate': 0.001,
             'discount_factor': 0.99,
             'start_e': 1.0,
@@ -390,18 +388,16 @@ def run_single_experiment(algorithm, network, config_override=None):
             'kan_grid': 7,
             'kan_k': 3,
             'kan_num_stds': 3,
-            'seed': 42  # Use a different seed for single tests
+            'seed': 42
         }
     else:
         default_config = {
             'algorithm': algorithm,
             'network': network,
             'env_name': 'CartPole-v1',
-            # 'num_episodes': 200,
-            'num_episodes': 10,
-            # 'max_steps': 500,
-            'max_steps': 100,
-            'learning_rate': 1.0,
+            'num_episodes': 200,
+            'max_steps': 500,
+            'learning_rate': 0.001,
             'discount_factor': 0.99,
             'lambda_': 0.8,
             'kappa': 2.0,
@@ -412,16 +408,20 @@ def run_single_experiment(algorithm, network, config_override=None):
             'kan_grid': 7,
             'kan_k': 3,
             'kan_num_stds': 3,
-            'seed': 42  # Use a different seed for single tests
+            'seed': 42
         }
     
     if config_override:
         default_config.update(config_override)
     
+    # Use provided run_name or create default
+    if run_name is None:
+        run_name = f"{algorithm}-{network}-single"
+    
     with wandb.init(
-        project="streamq-hyperopt",
+        project=project_name,
         config=default_config,
-        name=f"{algorithm}-{network}-single"
+        name=run_name
     ) as run:
         final_reward = run_sweep_agent()
         print(f"Final reward: {final_reward:.2f}")
@@ -440,6 +440,7 @@ if __name__ == '__main__':
     parser.add_argument('--project', default='streamq-hyperopt', help='Wandb project name')
     parser.add_argument('--sweep_id', help='Sweep ID for agent mode (optional when called by wandb agent)')
     parser.add_argument('--count', type=int, default=50, help='Number of sweep runs')
+    parser.add_argument('--run_name', help='Custom run name for single experiments')
     
     # Additional parameters that wandb agent might pass
     parser.add_argument('--discount_factor', type=float, help='Discount factor')
@@ -498,7 +499,53 @@ if __name__ == '__main__':
             print("Error: --algorithm and --network required for single mode")
             exit(1)
         print(f"Running single experiment for {args.algorithm}-{args.network}")
-        final_reward = run_single_experiment(args.algorithm, args.network)
+        
+        # Build config override from command line arguments
+        config_override = {}
+        if args.env_name:
+            config_override['env_name'] = args.env_name
+        if args.num_episodes:
+            config_override['num_episodes'] = args.num_episodes
+        if args.max_steps:
+            config_override['max_steps'] = args.max_steps
+        if args.seed is not None:
+            config_override['seed'] = args.seed
+        if args.learning_rate:
+            config_override['learning_rate'] = args.learning_rate
+        if args.discount_factor:
+            config_override['discount_factor'] = args.discount_factor
+        if args.start_e:
+            config_override['start_e'] = args.start_e
+        if args.end_e:
+            config_override['end_e'] = args.end_e
+        if args.decay_duration:
+            config_override['decay_duration'] = args.decay_duration
+        if args.exploration_fraction:
+            config_override['exploration_fraction'] = args.exploration_fraction
+        if args.lambda_:
+            config_override['lambda_'] = args.lambda_
+        if args.kappa:
+            config_override['kappa'] = args.kappa
+        if args.kan_grid:
+            config_override['kan_grid'] = args.kan_grid
+        if args.kan_k:
+            config_override['kan_k'] = args.kan_k
+        if args.kan_num_stds:
+            config_override['kan_num_stds'] = args.kan_num_stds
+        if args.hidden_dims:
+            # Parse hidden_dims if provided as string
+            try:
+                config_override['hidden_dims'] = eval(args.hidden_dims)
+            except:
+                print(f"Warning: Could not parse hidden_dims: {args.hidden_dims}")
+        
+        final_reward = run_single_experiment(
+            args.algorithm, 
+            args.network, 
+            config_override, 
+            args.project,
+            args.run_name
+        )
         print(f"Experiment completed with final reward: {final_reward:.2f}")
     else:
         print("Error: Mode required (or script called by wandb agent)")
